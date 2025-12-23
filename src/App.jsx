@@ -598,6 +598,34 @@ function MainApp() {
 
   // Settings Screen
   if (currentScreen === 'settings') {
+    const [phoneNumber, setPhoneNumber] = useState(userProfile?.phone_number || '');
+    const [savingPhone, setSavingPhone] = useState(false);
+
+    const savePhoneNumber = async () => {
+      if (!phoneNumber || !phoneNumber.match(/^\+\d{10,15}$/)) {
+        alert('Please enter a valid phone number in E.164 format (e.g., +15551234567)');
+        return;
+      }
+
+      setSavingPhone(true);
+      try {
+        const { error } = await supabase
+          .from('users')
+          .update({ phone_number: phoneNumber })
+          .eq('id', userProfile.id);
+
+        if (error) throw error;
+
+        setUserProfile({ ...userProfile, phone_number: phoneNumber });
+        alert('Phone number saved! You can now forward spam calls to your AI defender.');
+      } catch (error) {
+        console.error('Error saving phone number:', error);
+        alert('Failed to save phone number');
+      } finally {
+        setSavingPhone(false);
+      }
+    };
+
     return (
       <div className="min-h-screen bg-gradient-to-br from-emerald-950 via-emerald-900 to-emerald-950">
         <NavBar />
@@ -605,6 +633,34 @@ function MainApp() {
           <div className="mb-8">
             <h2 className="text-3xl font-bold text-white mb-2">Settings</h2>
             <p className="text-emerald-300">Manage your account and preferences</p>
+          </div>
+
+          <div className="bg-emerald-800/40 rounded-xl p-6 border border-emerald-700/30 mb-6">
+            <h3 className="text-white font-bold mb-3">📞 Your Phone Number</h3>
+            <p className="text-emerald-300 text-sm mb-4">
+              Register your phone number so we can identify your spam calls
+            </p>
+            <div className="flex gap-3">
+              <input
+                type="tel"
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+                placeholder="+1 (555) 123-4567"
+                className="flex-1 bg-emerald-900/50 border border-emerald-700/50 rounded-xl px-4 py-3 text-white placeholder-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+              <button
+                onClick={savePhoneNumber}
+                disabled={savingPhone}
+                className="bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-bold px-6 py-3 rounded-xl hover:from-emerald-600 hover:to-emerald-700 transition-all disabled:opacity-50"
+              >
+                {savingPhone ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+            {userProfile?.phone_number && (
+              <p className="text-emerald-400 text-xs mt-2">
+                ✓ Registered: {userProfile.phone_number}
+              </p>
+            )}
           </div>
 
           <div className="space-y-3 mb-6">
