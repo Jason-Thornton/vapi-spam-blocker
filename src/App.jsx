@@ -57,9 +57,12 @@ function App() {
   const [activeCall, setActiveCall] = useState(null);
   const [serverStatus, setServerStatus] = useState('checking');
 
+  // API URL - works in both dev and production
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
   useEffect(() => {
     // Check server connection
-    fetch('/api/test')
+    fetch(`${API_URL}/api/test`)
       .then(res => res.json())
       .then(data => {
         setServerStatus(data.vapiConnected ? 'connected' : 'disconnected');
@@ -74,7 +77,7 @@ function App() {
     }
 
     try {
-      const response = await fetch('/api/call/start', {
+      const response = await fetch(`${API_URL}/api/call/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -104,7 +107,7 @@ function App() {
     if (!activeCall) return;
 
     try {
-      await fetch('/api/call/end', {
+      await fetch(`${API_URL}/api/call/end`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ callId: activeCall.id })
