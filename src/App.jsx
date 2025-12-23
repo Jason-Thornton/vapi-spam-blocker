@@ -1,5 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Phone, PhoneOff, Settings, User, List, PlayCircle, PauseCircle, Shield, CheckCircle, XCircle, Home } from 'lucide-react';
+import { Phone, PhoneOff, Settings, User, List, PlayCircle, Shield, CheckCircle, XCircle, LogOut } from 'lucide-react';
+import { ClerkProvider, SignedIn, SignedOut, SignInButton, UserButton, useUser } from '@clerk/clerk-react';
+
+// Get Clerk publishable key from environment
+const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
 // AI Personas data
 const personas = [
@@ -37,8 +41,9 @@ const personas = [
   }
 ];
 
-function App() {
-  const [currentScreen, setCurrentScreen] = useState('welcome'); // welcome, personas, settings, calls, active-call
+function MainApp() {
+  const { user } = useUser();
+  const [currentScreen, setCurrentScreen] = useState('welcome');
   const [selectedPersona, setSelectedPersona] = useState(null);
   const [settings, setSettings] = useState({
     autoBlock: true,
@@ -142,36 +147,62 @@ function App() {
             <p className="text-emerald-300 text-lg">AI-Powered Call Protection</p>
           </div>
 
-          <div className="space-y-4 mb-8 text-left">
-            <div className="flex items-start gap-3 p-4 bg-emerald-800/40 rounded-xl">
-              <div className="w-2 h-2 bg-emerald-400 rounded-full mt-2"></div>
-              <div>
-                <h3 className="text-white font-semibold mb-1">Smart AI Defense</h3>
-                <p className="text-emerald-300 text-sm">Let AI personas waste spammers' time, not yours</p>
+          <SignedOut>
+            <div className="space-y-4 mb-8 text-left">
+              <div className="flex items-start gap-3 p-4 bg-emerald-800/40 rounded-xl">
+                <div className="w-2 h-2 bg-emerald-400 rounded-full mt-2"></div>
+                <div>
+                  <h3 className="text-white font-semibold mb-1">Smart AI Defense</h3>
+                  <p className="text-emerald-300 text-sm">Let AI personas waste spammers' time, not yours</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 p-4 bg-emerald-800/40 rounded-xl">
+                <div className="w-2 h-2 bg-emerald-400 rounded-full mt-2"></div>
+                <div>
+                  <h3 className="text-white font-semibold mb-1">Auto Call Routing</h3>
+                  <p className="text-emerald-300 text-sm">Automatically detect and redirect spam calls</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 p-4 bg-emerald-800/40 rounded-xl">
+                <div className="w-2 h-2 bg-emerald-400 rounded-full mt-2"></div>
+                <div>
+                  <h3 className="text-white font-semibold mb-1">Call Recording</h3>
+                  <p className="text-emerald-300 text-sm">Review hilarious conversations later</p>
+                </div>
               </div>
             </div>
-            <div className="flex items-start gap-3 p-4 bg-emerald-800/40 rounded-xl">
-              <div className="w-2 h-2 bg-emerald-400 rounded-full mt-2"></div>
-              <div>
-                <h3 className="text-white font-semibold mb-1">Auto Call Routing</h3>
-                <p className="text-emerald-300 text-sm">Automatically detect and redirect spam calls</p>
-              </div>
-            </div>
-            <div className="flex items-start gap-3 p-4 bg-emerald-800/40 rounded-xl">
-              <div className="w-2 h-2 bg-emerald-400 rounded-full mt-2"></div>
-              <div>
-                <h3 className="text-white font-semibold mb-1">Call Recording</h3>
-                <p className="text-emerald-300 text-sm">Review hilarious conversations later</p>
-              </div>
-            </div>
-          </div>
 
-          <button
-            onClick={() => setCurrentScreen('personas')}
-            className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-bold py-4 px-6 rounded-xl hover:from-emerald-600 hover:to-emerald-700 transition-all transform hover:scale-105 shadow-lg shadow-emerald-500/50"
-          >
-            Get Started →
-          </button>
+            <SignInButton mode="modal">
+              <button className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-bold py-4 px-6 rounded-xl hover:from-emerald-600 hover:to-emerald-700 transition-all transform hover:scale-105 shadow-lg shadow-emerald-500/50">
+                Sign In to Get Started →
+              </button>
+            </SignInButton>
+
+            <p className="text-emerald-400 text-sm mt-4">
+              Create a free account to protect yourself from spam calls
+            </p>
+          </SignedOut>
+
+          <SignedIn>
+            <div className="space-y-4 mb-6">
+              <div className="bg-emerald-800/40 rounded-xl p-4 flex items-center gap-3">
+                <div className="w-12 h-12 bg-emerald-700 rounded-full flex items-center justify-center">
+                  <User className="w-6 h-6 text-white" />
+                </div>
+                <div className="text-left flex-1">
+                  <p className="text-white font-semibold">Welcome back!</p>
+                  <p className="text-emerald-300 text-sm">{user?.primaryEmailAddress?.emailAddress}</p>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setCurrentScreen('personas')}
+              className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-bold py-4 px-6 rounded-xl hover:from-emerald-600 hover:to-emerald-700 transition-all transform hover:scale-105 shadow-lg shadow-emerald-500/50"
+            >
+              Enter Dashboard →
+            </button>
+          </SignedIn>
 
           <div className="mt-6 flex items-center justify-center gap-2 text-sm">
             <div className={`w-2 h-2 rounded-full ${serverStatus === 'connected' ? 'bg-emerald-400' : 'bg-red-400'}`}></div>
@@ -191,25 +222,28 @@ function App() {
         <Shield className="w-6 h-6 text-emerald-400" />
         <h1 className="text-white font-bold text-lg">SpamStopper</h1>
       </div>
-      <div className="flex gap-2">
-        <button
-          onClick={() => setCurrentScreen('personas')}
-          className={`p-2 rounded-lg ${currentScreen === 'personas' ? 'bg-emerald-600' : 'bg-emerald-800/50'}`}
-        >
-          <User className="w-5 h-5 text-white" />
-        </button>
-        <button
-          onClick={() => setCurrentScreen('calls')}
-          className={`p-2 rounded-lg ${currentScreen === 'calls' ? 'bg-emerald-600' : 'bg-emerald-800/50'}`}
-        >
-          <List className="w-5 h-5 text-white" />
-        </button>
-        <button
-          onClick={() => setCurrentScreen('settings')}
-          className={`p-2 rounded-lg ${currentScreen === 'settings' ? 'bg-emerald-600' : 'bg-emerald-800/50'}`}
-        >
-          <Settings className="w-5 h-5 text-white" />
-        </button>
+      <div className="flex items-center gap-3">
+        <div className="flex gap-2">
+          <button
+            onClick={() => setCurrentScreen('personas')}
+            className={`p-2 rounded-lg ${currentScreen === 'personas' ? 'bg-emerald-600' : 'bg-emerald-800/50'}`}
+          >
+            <User className="w-5 h-5 text-white" />
+          </button>
+          <button
+            onClick={() => setCurrentScreen('calls')}
+            className={`p-2 rounded-lg ${currentScreen === 'calls' ? 'bg-emerald-600' : 'bg-emerald-800/50'}`}
+          >
+            <List className="w-5 h-5 text-white" />
+          </button>
+          <button
+            onClick={() => setCurrentScreen('settings')}
+            className={`p-2 rounded-lg ${currentScreen === 'settings' ? 'bg-emerald-600' : 'bg-emerald-800/50'}`}
+          >
+            <Settings className="w-5 h-5 text-white" />
+          </button>
+        </div>
+        <UserButton afterSignOutUrl="/" />
       </div>
     </div>
   );
@@ -338,6 +372,20 @@ function App() {
           </div>
 
           <div className="mt-8 bg-emerald-800/40 rounded-xl p-6 border border-emerald-700/30">
+            <h3 className="text-white font-bold mb-3">Account Information</h3>
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <span className="text-emerald-400">Email:</span>
+                <span className="text-white">{user?.primaryEmailAddress?.emailAddress}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-emerald-400">Member since:</span>
+                <span className="text-white">{new Date(user?.createdAt).toLocaleDateString()}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 bg-emerald-800/40 rounded-xl p-6 border border-emerald-700/30">
             <h3 className="text-white font-bold mb-3">Active Persona</h3>
             {selectedPersona ? (
               <div className="flex items-center gap-3 p-3 bg-emerald-900/50 rounded-lg">
@@ -461,6 +509,26 @@ function App() {
   }
 
   return null;
+}
+
+function App() {
+  if (!clerkPubKey) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-950 via-emerald-900 to-emerald-950 flex items-center justify-center p-4">
+        <div className="text-center text-white">
+          <p className="text-xl font-bold mb-2">⚠️ Configuration Error</p>
+          <p className="text-emerald-300">Missing Clerk Publishable Key</p>
+          <p className="text-sm text-emerald-400 mt-2">Add VITE_CLERK_PUBLISHABLE_KEY to your .env file</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <ClerkProvider publishableKey={clerkPubKey}>
+      <MainApp />
+    </ClerkProvider>
+  );
 }
 
 export default App;
