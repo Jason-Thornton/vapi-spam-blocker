@@ -256,6 +256,134 @@ app.post('/api/create-checkout-session', async (req, res) => {
         userId: userId
       }
     });
+    // Vapi webhook to handle incoming calls
+app.post('/api/vapi-webhook', express.json(), async (req, res) => {
+  const event = req.body;
+  
+  console.log('📞 Vapi webhook received:', event.type || event.message?.type);
+
+  try {
+    const { createClient } = await import('@supabase/supabase-js');
+    const supabase = createClient(
+      process.env.VITE_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_KEY
+    );
+
+    // Handle call start - verify user has calls remaining
+    if (event.message?.type === 'function-call' && event.message?.functionCall?.name === 'checkCallAllowed') {
+      const customerNumber = event.message.call?.customer?.number;
+      
+      console.log('🔍 Checking if call allowed for:', customerNumber);
+
+      // Find user by phone number
+      const { data: user } = await supabase
+        .from('users')
+        .select('*')
+        .eq('phone_number', customerNumber)
+        .single();
+
+      if (!user) {
+        console.log('❌ User not found for number:', customerNumber);
+        return res.json({
+          result: {
+            allowed: false,
+            message: 'Phone number not registered'
+          }
+        });
+      }
+
+      // Check if user has calls remaining
+      if (user.calls_used_this_month >= user.calls_limit) {
+        console.log('❌ User over limit:', user.calls_used_this_month, '/', user.calls_limit);
+        return res.json({
+          result: {
+            allowed: false,
+            message: 'Monthly call limit reached. Please upgrade your plan.'
+          }
+        });
+      }
+
+      console.log('✅ Call allowed for user:', user.email);
+      return res.json({
+        result: {
+          allowed: true,
+          callsRemaining: user.calls_limit - user.calls_used_this_month
+        }
+      });
+    }
+
+    // Handle call end - log to database
+    if (event.message?.type === 'end-of-call-report') {
+      const callData = event.message;
+      const customerNumber = callData.call?.customer?.number;
+      const assistantId = callData.call?.assistantId;
+      
+      console.log('📝 Logging completed call from:', customerNumber);
+
+      // Find user by phone number
+      const { data: user } = await supabase
+        .from('users')
+        .select('*')
+        .eq('phone_number', customerNumber)
+        .single();
+
+      if (!user) {
+        console.log('⚠️ Call completed but user not found:', customerNumber);
+        return res.json({ received: true });
+      }
+
+      // Find which persona was used
+      const personas = [
+        { id: '37c03d2d-c045-42f5-b8f5-53beca2b34d8', name: 'Herbert' },
+        { id: '23ed87ac-9f1e-4353-a3aa-c27d70d93342', name: 'Jolene' },
+        { id: 'd99eeb74-6dad-4149-ac33-e2c7bb0dba57', name: 'Derek' },
+        { id: 'b2243844-0748-442f-b7c8-395b6f342e0f', name: 'Danny' }
+      ];
+      const persona = personas.find(p => p.id === assistantId);
+
+      // Log call to database
+      const { error: logError } = await supabase
+        .from('call_logs')
+        .insert([{
+          user_id: user.id,
+          caller_phone_number: customerNumber,
+          agent_name: persona?.name || 'Unknown',
+          agent_id: assistantId,
+          call_duration: callData.call?.duration || 0,
+          call_status: 'completed',
+          vapi_call_id: callData.call?.id,
+          transcript: callData.transcript || null,
+          recording_url: callData.recordingUrl || null
+        }]);
+
+      if (logError) {
+        console.error('❌ Error logging call:', logError);
+      } else {
+        console.log('✅ Call logged successfully');
+      }
+
+      // Increment user's call counter
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({
+          calls_used_this_month: user.calls_used_this_month + 1,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', user.id);
+
+      if (updateError) {
+        console.error('❌ Error updating call count:', updateError);
+      } else {
+        console.log('✅ Call count updated:', user.calls_used_this_month + 1, '/', user.calls_limit);
+      }
+    }
+
+    res.json({ received: true });
+  } catch (error) {
+    console.error('❌ Vapi webhook error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
     res.json({ sessionId: session.id, url: session.url });
   } catch (error) {
