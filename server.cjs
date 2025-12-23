@@ -1,17 +1,12 @@
-import dotenv from 'dotenv';
-dotenv.config();
-
-import express from 'express';
+import express, { json, raw } from 'express';
 import cors from 'cors';
-import Stripe from 'stripe';
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(json());
 
 // Check if API key exists
 if (!process.env.VAPI_API_KEY) {
@@ -128,7 +123,6 @@ app.get('/api/assistants', async (req, res) => {
     });
   }
 });
-
 // Create Stripe checkout session
 app.post('/api/create-checkout-session', async (req, res) => {
   const { priceId, userId, userEmail } = req.body;
@@ -159,116 +153,32 @@ app.post('/api/create-checkout-session', async (req, res) => {
 });
 
 // Stripe webhook to handle successful payments
-app.post('/api/stripe-webhook', express.raw({type: 'application/json'}), async (req, res) => {
+app.post('/api/stripe-webhook', raw({type: 'application/json'}), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
 
   try {
-    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET || 'skip');
+    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
   } catch (err) {
-    console.error('⚠️ Webhook signature verification failed:', err.message);
+    console.error('Webhook signature verification failed:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  console.log('📨 Received webhook event:', event.type);
-
-  try {
-    // Handle successful checkout
-    if (event.type === 'checkout.session.completed') {
-      const session = event.data.object;
-      const userId = session.metadata.userId;
-      const subscriptionId = session.subscription;
-      
-      console.log('💳 Payment successful for user:', userId);
-
-      // Get the subscription to find the price ID
-      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-      const priceId = subscription.items.data[0].price.id;
-
-      // Map price ID to tier
-      const priceToTier = {
-        'price_1ShVJw4B9Z0lrxzSA6s0oSSY': 'basic',
-        'price_1ShVKa4B9Z0lrxzSUJ9GAJ2e': 'pro',
-        'price_1ShVLV4B9Z0lrxzShnjg62aP': 'unlimited'
-      };
-
-      const tier = priceToTier[priceId];
-      
-      if (!tier) {
-        console.error('❌ Unknown price ID:', priceId);
-        return res.status(400).send('Unknown price ID');
-      }
-
-      // Update user in Supabase
-      const { createClient } = await import('@supabase/supabase-js');
-      const supabase = createClient(
-        process.env.VITE_SUPABASE_URL,
-        process.env.SUPABASE_SERVICE_KEY
-      );
-
-      const callsLimit = tier === 'basic' ? 15 : tier === 'pro' ? 50 : 999999;
-
-      const { data, error } = await supabase
-        .from('users')
-        .update({
-          subscription_tier: tier,
-          subscription_status: 'active',
-          calls_limit: callsLimit,
-          stripe_customer_id: session.customer,
-          stripe_subscription_id: subscriptionId,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', userId);
-
-      if (error) {
-        console.error('❌ Error updating user:', error);
-        return res.status(500).send('Database error');
-      }
-
-      console.log('✅ User upgraded to:', tier);
-    }
-
-    // Handle subscription cancellation
-    if (event.type === 'customer.subscription.deleted') {
-      const subscription = event.data.object;
-      
-      const { createClient } = await import('@supabase/supabase-js');
-      const supabase = createClient(
-        process.env.VITE_SUPABASE_URL,
-        process.env.SUPABASE_SERVICE_KEY
-      );
-
-      const { error } = await supabase
-        .from('users')
-        .update({
-          subscription_tier: 'free',
-          subscription_status: 'cancelled',
-          calls_limit: 5,
-          updated_at: new Date().toISOString()
-        })
-        .eq('stripe_subscription_id', subscription.id);
-
-      if (error) {
-        console.error('❌ Error downgrading user:', error);
-      } else {
-        console.log('✅ User downgraded to free');
-      }
-    }
-
-    res.json({received: true});
-  } catch (error) {
-    console.error('❌ Webhook handler error:', error);
-    res.status(500).send('Webhook handler failed');
+  // Handle the event
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    console.log('Payment successful!', session);
+    // You'll update the user's subscription in Supabase here
   }
-});
 
+  res.json({received: true});
+});
 app.listen(PORT, () => {
   console.log(`✅ Server running on http://localhost:${PORT}`);
   console.log(`🔑 Vapi API Key: ${process.env.VAPI_API_KEY ? 'Connected' : 'Missing'}`);
-  console.log(`💳 Stripe: ${process.env.STRIPE_SECRET_KEY ? 'Connected' : 'Missing'}`);
   if (process.env.VAPI_PHONE_NUMBER_ID) {
     console.log(`📞 Vapi Phone Number ID: ${process.env.VAPI_PHONE_NUMBER_ID}`);
   } else {
-    console.log(`⚠️  No VAPI_PHONE_NUMBER_ID set`);
+    console.log(`⚠️  No VAPI_PHONE_NUMBER_ID set - you may need to add one`);
   }
 });
