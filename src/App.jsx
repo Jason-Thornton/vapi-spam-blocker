@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Phone, PhoneOff, Settings, User, List, PlayCircle, Shield, CheckCircle, XCircle, CreditCard, Zap } from 'lucide-react';
+import { Phone, PhoneOff, Settings, User, List, PlayCircle, Shield, CheckCircle, XCircle, CreditCard, Zap, BookOpen, Share2, Copy, Facebook, Twitter, MessageCircle } from 'lucide-react';
 import { ClerkProvider, SignedIn, SignedOut, SignInButton, UserButton, useUser } from '@clerk/clerk-react';
 import { supabase } from './lib/supabase';
 import stripePromise from './lib/stripe';
@@ -78,9 +78,38 @@ function MainApp() {
   const [activeCall, setActiveCall] = useState(null);
   const [serverStatus, setServerStatus] = useState('checking');
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
+  const [tutorialStep, setTutorialStep] = useState(0);
+  const [shareModal, setShareModal] = useState(null);
+  const [sharedCall, setSharedCall] = useState(null);
 
   // API URL - works in both dev and production
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
+  // Check if URL is a shared call link
+  useEffect(() => {
+    const path = window.location.pathname;
+    const shareMatch = path.match(/\/share\/(.+)/);
+    if (shareMatch) {
+      const callId = shareMatch[1];
+      fetchSharedCall(callId);
+    }
+  }, []);
+
+  // Fetch shared call data
+  const fetchSharedCall = async (callId) => {
+    try {
+      const response = await fetch(`${API_URL}/api/shared-call/${callId}`);
+      const data = await response.json();
+
+      if (data.success) {
+        setSharedCall(data.call);
+        setCurrentScreen('shared-call');
+      }
+    } catch (error) {
+      console.error('Error fetching shared call:', error);
+    }
+  };
 
   // Handle Stripe checkout
   const handleUpgrade = async (tier) => {
@@ -134,6 +163,8 @@ function MainApp() {
 
   const fetchOrCreateUserProfile = async () => {
     try {
+      console.log('Fetching user profile for clerk_user_id:', user.id);
+
       // Check if user exists
       const { data: existingUser, error: fetchError } = await supabase
         .from('users')
@@ -141,10 +172,14 @@ function MainApp() {
         .eq('clerk_user_id', user.id)
         .single();
 
-      if (existingUser) {
+      console.log('Supabase response - data:', existingUser, 'error:', fetchError);
+
+      // If user exists (no error or data is present)
+      if (existingUser && !fetchError) {
+        console.log('✅ Existing user found:', existingUser);
         setUserProfile(existingUser);
         setSelectedPersona(personas.find(p => p.id === existingUser.selected_agent_id));
-        
+
         // Fetch user's call logs
         const { data: callLogs } = await supabase
           .from('call_logs')
@@ -152,7 +187,7 @@ function MainApp() {
           .eq('user_id', existingUser.id)
           .order('created_at', { ascending: false })
           .limit(10);
-        
+
         if (callLogs) {
           setCalls(callLogs.map(log => ({
             id: log.id,
@@ -163,8 +198,11 @@ function MainApp() {
             timestamp: new Date(log.created_at).toLocaleString()
           })));
         }
-      } else {
-        // Create new user profile
+      } else if (fetchError) {
+        // User doesn't exist or other error
+        console.log('❌ Error fetching user. Code:', fetchError.code, 'Message:', fetchError.message);
+        console.log('🆕 Creating new user and showing tutorial');
+
         const { data: newUser, error: createError } = await supabase
           .from('users')
           .insert([
@@ -179,14 +217,26 @@ function MainApp() {
           .select()
           .single();
 
-        if (createError) throw createError;
+        if (createError) {
+          console.error('❌ Error creating user:', createError);
+          throw createError;
+        }
+
+        console.log('✅ New user created:', newUser);
+        console.log('🎓 Setting tutorial screen. Current screen before:', currentScreen);
+
         setUserProfile(newUser);
         setSelectedPersona(personas[0]); // Default to Herbert
+        setShowTutorial(true);
+        setCurrentScreen('tutorial');
+
+        console.log('🎓 Tutorial screen set. showTutorial:', true, 'currentScreen:', 'tutorial');
       }
     } catch (error) {
-      console.error('Error with user profile:', error);
+      console.error('💥 Error with user profile:', error);
     } finally {
       setLoading(false);
+      console.log('Loading complete. Final currentScreen:', currentScreen);
     }
   };
 
@@ -283,6 +333,283 @@ function MainApp() {
     }
   };
 
+  // Shared Call View (Public page for shared links)
+  if (currentScreen === 'shared-call' && sharedCall) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-950 via-emerald-900 to-emerald-950 flex items-center justify-center p-4">
+        <div className="max-w-2xl w-full bg-emerald-900/30 backdrop-blur-lg rounded-3xl p-8 border border-emerald-700/30 shadow-2xl">
+          <div className="text-center mb-8">
+            <div className="w-24 h-24 mx-auto bg-gradient-to-br from-emerald-500/20 to-emerald-700/20 rounded-3xl flex items-center justify-center mb-4">
+              <Shield className="w-12 h-12 text-emerald-400" />
+            </div>
+            <h1 className="text-3xl font-bold text-white mb-2">SpamStopper in Action!</h1>
+            <p className="text-emerald-300">Listen to how our AI handled this spam call</p>
+          </div>
+
+          <div className="bg-emerald-800/40 rounded-2xl p-6 border border-emerald-700/30 mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <p className="text-white font-bold text-lg">{sharedCall.persona} vs Spammer</p>
+                <p className="text-emerald-400 text-sm">{sharedCall.number}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-emerald-300 text-sm">Call Duration</p>
+                <p className="text-white font-bold text-2xl">{sharedCall.duration}</p>
+              </div>
+            </div>
+
+            {sharedCall.recording_url && (
+              <div className="bg-emerald-900/50 rounded-xl p-4 mb-4">
+                <audio controls className="w-full">
+                  <source src={sharedCall.recording_url} type="audio/mpeg" />
+                  Your browser does not support the audio element.
+                </audio>
+              </div>
+            )}
+
+            {sharedCall.transcript && (
+              <div className="bg-emerald-900/50 rounded-xl p-4">
+                <h4 className="text-white font-semibold mb-2">Transcript</h4>
+                <p className="text-emerald-300 text-sm whitespace-pre-wrap">{sharedCall.transcript}</p>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-gradient-to-br from-emerald-600/20 to-emerald-700/20 rounded-2xl p-6 border border-emerald-500/30 text-center">
+            <h3 className="text-white font-bold text-xl mb-3">Want to waste spammers' time too?</h3>
+            <p className="text-emerald-300 mb-4">
+              Join SpamStopper and let AI defenders handle your spam calls while you enjoy peace and quiet.
+            </p>
+            <SignInButton mode="modal">
+              <button className="bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-bold py-3 px-8 rounded-xl hover:from-emerald-600 hover:to-emerald-700 transition-all transform hover:scale-105 shadow-lg shadow-emerald-500/50">
+                Get Started Free - 5 Calls/Month
+              </button>
+            </SignInButton>
+            <p className="text-emerald-400 text-xs mt-3">No credit card required</p>
+          </div>
+
+          <div className="mt-6 grid grid-cols-3 gap-4 text-center">
+            <div className="bg-emerald-800/20 rounded-xl p-3">
+              <Shield className="w-6 h-6 text-emerald-400 mx-auto mb-1" />
+              <p className="text-white text-sm font-semibold">AI Protection</p>
+            </div>
+            <div className="bg-emerald-800/20 rounded-xl p-3">
+              <PlayCircle className="w-6 h-6 text-emerald-400 mx-auto mb-1" />
+              <p className="text-white text-sm font-semibold">Call Recording</p>
+            </div>
+            <div className="bg-emerald-800/20 rounded-xl p-3">
+              <Zap className="w-6 h-6 text-emerald-400 mx-auto mb-1" />
+              <p className="text-white text-sm font-semibold">Instant Setup</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Tutorial Screen
+  if (currentScreen === 'tutorial') {
+    const tutorialSteps = [
+      {
+        title: 'Welcome to SpamStopper!',
+        description: 'Let\'s get you set up in 3 easy steps',
+        icon: <Shield className="w-16 h-16 text-emerald-400" />,
+        content: (
+          <div className="space-y-4 text-left">
+            <p className="text-emerald-300">
+              SpamStopper uses AI personas to answer and waste spammers' time, so you don't have to deal with them.
+            </p>
+            <div className="bg-emerald-800/40 rounded-xl p-4">
+              <h4 className="text-white font-semibold mb-2">What you'll learn:</h4>
+              <ul className="space-y-2 text-emerald-300 text-sm">
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-400" />
+                  How to choose your AI defender
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-400" />
+                  How to forward spam calls
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-400" />
+                  How to view call history
+                </li>
+              </ul>
+            </div>
+          </div>
+        )
+      },
+      {
+        title: 'Step 1: Choose Your AI Defender',
+        description: 'Pick an AI persona to handle your spam calls',
+        icon: <User className="w-16 h-16 text-emerald-400" />,
+        content: (
+          <div className="space-y-4 text-left">
+            <p className="text-emerald-300">
+              Each AI persona has a unique personality designed to keep spammers on the line as long as possible.
+            </p>
+            <div className="bg-emerald-800/40 rounded-xl p-4">
+              <div className="flex items-center gap-3 mb-3">
+                <span className="text-3xl">{personas[0].avatar}</span>
+                <div>
+                  <p className="text-white font-semibold">{personas[0].name}</p>
+                  <p className="text-emerald-400 text-sm">{personas[0].description}</p>
+                </div>
+              </div>
+              <p className="text-emerald-300 text-sm">
+                On the free plan, you get access to Herbert. Upgrade to unlock all 4 AI defenders!
+              </p>
+            </div>
+          </div>
+        )
+      },
+      {
+        title: 'Step 2: Set Up Call Forwarding',
+        description: 'Automatically forward spam calls to your AI defender',
+        icon: <Phone className="w-16 h-16 text-emerald-400" />,
+        content: (
+          <div className="space-y-4 text-left">
+            <p className="text-emerald-300">
+              Set up automatic call forwarding on your phone to send calls to your chosen AI persona's number.
+            </p>
+            <div className="bg-emerald-800/40 rounded-xl p-4">
+              <h4 className="text-white font-semibold mb-2">How it works:</h4>
+              <ol className="space-y-2 text-emerald-300 text-sm list-decimal list-inside">
+                <li>Forward your phone to: <span className="text-white font-mono font-bold">{personas[0].vapiPhoneNumber}</span></li>
+                <li>When a call comes in, it automatically forwards to your AI</li>
+                <li>Spam/unknown numbers are answered by your AI defender</li>
+                <li>Known contacts can still reach you directly</li>
+              </ol>
+            </div>
+            <div className="bg-amber-900/30 border border-amber-700/50 rounded-xl p-4">
+              <p className="text-amber-300 text-sm mb-3">
+                <strong>Tip:</strong> Set up conditional call forwarding for unknown numbers only, so calls from your contacts still come through normally.
+              </p>
+              <div className="border-t border-amber-700/30 pt-3">
+                <p className="text-amber-300 text-sm font-semibold mb-2">Turn off call forwarding:</p>
+                <ul className="text-amber-300 text-xs space-y-1 ml-4">
+                  <li>• iPhone: Settings → Phone → Call Forwarding → Toggle OFF</li>
+                  <li>• Android: Phone app → Settings → Calls → Call forwarding → Disable</li>
+                  <li>• Or dial: <span className="font-mono font-bold">##21#</span> to disable all forwarding</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        )
+      },
+      {
+        title: 'Step 3: Review & Enjoy',
+        description: 'Listen to recordings and track your blocked calls',
+        icon: <PlayCircle className="w-16 h-16 text-emerald-400" />,
+        content: (
+          <div className="space-y-4 text-left">
+            <p className="text-emerald-300">
+              After each call, you can review the recording and see how long your AI kept the spammer busy.
+            </p>
+            <div className="bg-emerald-800/40 rounded-xl p-4">
+              <h4 className="text-white font-semibold mb-2">You can also:</h4>
+              <ul className="space-y-2 text-emerald-300 text-sm">
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-400" />
+                  View your call history in the Calls tab
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-400" />
+                  Register your phone number in Settings
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-400" />
+                  Upgrade your plan for more calls and personas
+                </li>
+              </ul>
+            </div>
+            <div className="bg-emerald-800/40 rounded-xl p-4 text-center">
+              <p className="text-white font-semibold mb-2">Ready to get started?</p>
+              <p className="text-emerald-400 text-sm">
+                You have <strong>5 free calls</strong> this month to try it out!
+              </p>
+            </div>
+          </div>
+        )
+      }
+    ];
+
+    const currentStep = tutorialSteps[tutorialStep];
+
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-950 via-emerald-900 to-emerald-950 flex items-center justify-center p-4">
+        <div className="max-w-2xl w-full bg-emerald-900/30 backdrop-blur-lg rounded-3xl p-8 border border-emerald-700/30 shadow-2xl">
+          <div className="text-center mb-6">
+            <div className="w-24 h-24 mx-auto bg-gradient-to-br from-emerald-500/20 to-emerald-700/20 rounded-3xl flex items-center justify-center mb-4">
+              {currentStep.icon}
+            </div>
+            <h2 className="text-3xl font-bold text-white mb-2">{currentStep.title}</h2>
+            <p className="text-emerald-300">{currentStep.description}</p>
+          </div>
+
+          <div className="mb-8">
+            {currentStep.content}
+          </div>
+
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex gap-2">
+              {tutorialSteps.map((_, index) => (
+                <div
+                  key={index}
+                  className={`h-2 rounded-full transition-all ${
+                    index === tutorialStep ? 'w-8 bg-emerald-500' : 'w-2 bg-emerald-800'
+                  }`}
+                />
+              ))}
+            </div>
+            <span className="text-emerald-400 text-sm">
+              {tutorialStep + 1} of {tutorialSteps.length}
+            </span>
+          </div>
+
+          <div className="flex gap-3">
+            {tutorialStep > 0 && (
+              <button
+                onClick={() => setTutorialStep(tutorialStep - 1)}
+                className="flex-1 bg-emerald-800/50 text-white font-bold py-3 px-6 rounded-xl hover:bg-emerald-800/70 transition-all"
+              >
+                ← Back
+              </button>
+            )}
+            {tutorialStep < tutorialSteps.length - 1 ? (
+              <button
+                onClick={() => setTutorialStep(tutorialStep + 1)}
+                className="flex-1 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-bold py-3 px-6 rounded-xl hover:from-emerald-600 hover:to-emerald-700 transition-all"
+              >
+                Next →
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  setShowTutorial(false);
+                  setCurrentScreen('personas');
+                }}
+                className="flex-1 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-bold py-3 px-6 rounded-xl hover:from-emerald-600 hover:to-emerald-700 transition-all"
+              >
+                Get Started →
+              </button>
+            )}
+          </div>
+
+          <button
+            onClick={() => {
+              setShowTutorial(false);
+              setCurrentScreen('personas');
+            }}
+            className="w-full mt-4 text-emerald-400 hover:text-emerald-300 text-sm transition-all"
+          >
+            Skip tutorial
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // Welcome Screen
   if (currentScreen === 'welcome') {
     return (
@@ -319,6 +646,11 @@ function MainApp() {
                   <p className="text-emerald-300 text-sm">Review hilarious conversations later</p>
                 </div>
               </div>
+            </div>
+
+            <div className="mb-6">
+              <p className="text-white font-semibold mb-2">Create your free account to get started</p>
+              <p className="text-emerald-400 text-sm">Already have an account? Log in</p>
             </div>
 
             <SignInButton mode="modal">
@@ -414,6 +746,15 @@ function MainApp() {
             className={`p-2 rounded-lg ${currentScreen === 'subscription' ? 'bg-emerald-600' : 'bg-emerald-800/50'}`}
           >
             <CreditCard className="w-5 h-5 text-white" />
+          </button>
+          <button
+            onClick={() => {
+              setTutorialStep(0);
+              setCurrentScreen('tutorial');
+            }}
+            className={`p-2 rounded-lg ${currentScreen === 'tutorial' ? 'bg-emerald-600' : 'bg-emerald-800/50'}`}
+          >
+            <BookOpen className="w-5 h-5 text-white" />
           </button>
           <button
             onClick={() => setCurrentScreen('settings')}
@@ -597,32 +938,29 @@ function MainApp() {
   }
 
   // Settings Screen
+  // Settings Screen
   if (currentScreen === 'settings') {
-    const [phoneNumber, setPhoneNumber] = useState(userProfile?.phone_number || '');
-    const [savingPhone, setSavingPhone] = useState(false);
-
-    const savePhoneNumber = async () => {
-      if (!phoneNumber || !phoneNumber.match(/^\+\d{10,15}$/)) {
+    const handleSavePhone = async () => {
+      const phoneInput = document.getElementById('phoneNumberInput').value;
+      
+      if (!phoneInput || !phoneInput.match(/^\+\d{10,15}$/)) {
         alert('Please enter a valid phone number in E.164 format (e.g., +15551234567)');
         return;
       }
 
-      setSavingPhone(true);
       try {
         const { error } = await supabase
           .from('users')
-          .update({ phone_number: phoneNumber })
+          .update({ phone_number: phoneInput })
           .eq('id', userProfile.id);
 
         if (error) throw error;
 
-        setUserProfile({ ...userProfile, phone_number: phoneNumber });
+        setUserProfile({ ...userProfile, phone_number: phoneInput });
         alert('Phone number saved! You can now forward spam calls to your AI defender.');
       } catch (error) {
         console.error('Error saving phone number:', error);
         alert('Failed to save phone number');
-      } finally {
-        setSavingPhone(false);
       }
     };
 
@@ -642,18 +980,17 @@ function MainApp() {
             </p>
             <div className="flex gap-3">
               <input
+                id="phoneNumberInput"
                 type="tel"
-                value={phoneNumber}
-                onChange={(e) => setPhoneNumber(e.target.value)}
+                defaultValue={userProfile?.phone_number || ''}
                 placeholder="+1 (555) 123-4567"
                 className="flex-1 bg-emerald-900/50 border border-emerald-700/50 rounded-xl px-4 py-3 text-white placeholder-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
               <button
-                onClick={savePhoneNumber}
-                disabled={savingPhone}
-                className="bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-bold px-6 py-3 rounded-xl hover:from-emerald-600 hover:to-emerald-700 transition-all disabled:opacity-50"
+                onClick={handleSavePhone}
+                className="bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-bold px-6 py-3 rounded-xl hover:from-emerald-600 hover:to-emerald-700 transition-all"
               >
-                {savingPhone ? 'Saving...' : 'Save'}
+                Save
               </button>
             </div>
             {userProfile?.phone_number && (
@@ -784,16 +1121,93 @@ function MainApp() {
                       <span className="text-emerald-400 text-sm">Handled by:</span>
                       <span className="text-white text-sm font-semibold">{call.persona}</span>
                     </div>
-                    <button className="text-emerald-400 hover:text-emerald-300 text-sm font-semibold flex items-center gap-1">
-                      <PlayCircle className="w-4 h-4" />
-                      Play Recording
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <button className="text-emerald-400 hover:text-emerald-300 text-sm font-semibold flex items-center gap-1">
+                        <PlayCircle className="w-4 h-4" />
+                        Play Recording
+                      </button>
+                      <button
+                        onClick={() => setShareModal(call)}
+                        className="text-emerald-400 hover:text-emerald-300 text-sm font-semibold flex items-center gap-1"
+                      >
+                        <Share2 className="w-4 h-4" />
+                        Share
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
           )}
         </div>
+
+        {/* Share Modal */}
+        {shareModal && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={() => setShareModal(null)}>
+            <div className="bg-emerald-900/95 backdrop-blur-lg rounded-3xl p-6 max-w-md w-full border border-emerald-700/50 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-bold text-white">Share This Call</h3>
+                <button onClick={() => setShareModal(null)} className="text-emerald-400 hover:text-emerald-300">
+                  <XCircle className="w-6 h-6" />
+                </button>
+              </div>
+
+              <div className="bg-emerald-800/40 rounded-xl p-4 mb-6 border border-emerald-700/30">
+                <p className="text-white font-semibold mb-1">{shareModal.persona} vs Spammer</p>
+                <p className="text-emerald-400 text-sm mb-2">{shareModal.number}</p>
+                <p className="text-emerald-300 text-sm">Duration: {shareModal.duration}</p>
+              </div>
+
+              <p className="text-emerald-300 text-sm mb-4 text-center">
+                Share this hilarious spam call with friends! Help spread the word about SpamStopper!
+              </p>
+
+              <div className="space-y-3 mb-4">
+                <button
+                  onClick={() => {
+                    const shareUrl = `${window.location.origin}/share/${shareModal.id}`;
+                    const text = `Check out this hilarious spam call blocked by SpamStopper! ${shareModal.persona} kept them busy for ${shareModal.duration}!`;
+                    window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}&quote=${encodeURIComponent(text)}`, '_blank');
+                  }}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
+                  Share on Facebook
+                </button>
+
+                <button
+                  onClick={() => {
+                    const shareUrl = `${window.location.origin}/share/${shareModal.id}`;
+                    const text = `Check out this hilarious spam call blocked by SpamStopper! ${shareModal.persona} kept them busy for ${shareModal.duration}! 😂`;
+                    window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(shareUrl)}`, '_blank');
+                  }}
+                  className="w-full bg-black hover:bg-gray-900 text-white font-bold py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+                  Share on X (Twitter)
+                </button>
+
+                <button
+                  onClick={() => {
+                    const shareUrl = `${window.location.origin}/share/${shareModal.id}`;
+                    navigator.clipboard.writeText(shareUrl);
+                    alert('Link copied! You can now share it on TikTok, WhatsApp, or anywhere else!');
+                  }}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-2"
+                >
+                  <Copy className="w-5 h-5" />
+                  Copy Link for TikTok/WhatsApp
+                </button>
+              </div>
+
+              <div className="bg-amber-900/30 border border-amber-700/50 rounded-xl p-3">
+                <p className="text-amber-300 text-xs text-center">
+                  💡 When friends click your link, they'll hear the recording and be prompted to create their own free account!
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

@@ -265,6 +265,55 @@ app.post('/api/create-checkout-session', async (req, res) => {
 });
 
 // =============================================================================
+// SHARED CALL - Public endpoint for shared call links
+// =============================================================================
+app.get('/api/shared-call/:callId', async (req, res) => {
+  const { callId } = req.params;
+
+  try {
+    const { createClient } = await import('@supabase/supabase-js');
+    const supabase = createClient(
+      process.env.VITE_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_KEY
+    );
+
+    // Fetch call from database
+    const { data: call, error } = await supabase
+      .from('call_logs')
+      .select('*')
+      .eq('id', callId)
+      .single();
+
+    if (error || !call) {
+      return res.status(404).json({
+        success: false,
+        error: 'Call not found'
+      });
+    }
+
+    // Return public call data
+    res.json({
+      success: true,
+      call: {
+        id: call.id,
+        number: call.caller_phone_number,
+        duration: call.call_duration ? `${call.call_duration}s` : '0s',
+        persona: call.agent_name,
+        recording_url: call.recording_url,
+        transcript: call.transcript,
+        timestamp: new Date(call.created_at).toLocaleString()
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching shared call:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// =============================================================================
 // VAPI WEBHOOK - Handles incoming call events from Vapi
 // =============================================================================
 app.post('/api/vapi-webhook', async (req, res) => {
