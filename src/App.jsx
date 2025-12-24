@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Phone, PhoneOff, Settings, User, List, PlayCircle, Shield, CheckCircle, XCircle, CreditCard, Zap, BookOpen, Share2, Copy, Facebook, Twitter, MessageCircle } from 'lucide-react';
+import { Phone, PhoneOff, Settings, User, List, PlayCircle, Shield, CheckCircle, XCircle, CreditCard, Zap, BookOpen, Share2, Copy, Facebook, Twitter, MessageCircle, Mail, FileText, Send } from 'lucide-react';
 import { ClerkProvider, SignedIn, SignedOut, SignInButton, UserButton, useUser } from '@clerk/clerk-react';
 import { supabase } from './lib/supabase';
 import stripePromise from './lib/stripe';
@@ -760,6 +760,18 @@ function MainApp() {
             <BookOpen className="w-5 h-5 text-white" />
           </button>
           <button
+            onClick={() => setCurrentScreen('contact')}
+            className={`p-2 rounded-lg ${currentScreen === 'contact' ? 'bg-emerald-600' : 'bg-emerald-800/50'}`}
+          >
+            <Mail className="w-5 h-5 text-white" />
+          </button>
+          <button
+            onClick={() => setCurrentScreen('legal')}
+            className={`p-2 rounded-lg ${currentScreen === 'legal' ? 'bg-emerald-600' : 'bg-emerald-800/50'}`}
+          >
+            <FileText className="w-5 h-5 text-white" />
+          </button>
+          <button
             onClick={() => setCurrentScreen('settings')}
             className={`p-2 rounded-lg ${currentScreen === 'settings' ? 'bg-emerald-600' : 'bg-emerald-800/50'}`}
           >
@@ -1071,6 +1083,239 @@ function MainApp() {
             ) : (
               <p className="text-emerald-400 text-sm">No persona selected</p>
             )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Contact/Support Screen
+  if (currentScreen === 'contact') {
+    const [contactForm, setContactForm] = useState({ name: '', email: '', subject: '', message: '' });
+    const [submitStatus, setSubmitStatus] = useState('');
+
+    const handleContactSubmit = async (e) => {
+      e.preventDefault();
+      setSubmitStatus('sending');
+
+      // For now, just log to console - you can add email service later
+      console.log('Contact form submitted:', contactForm);
+
+      // Simulate sending
+      setTimeout(() => {
+        setSubmitStatus('success');
+        setContactForm({ name: '', email: '', subject: '', message: '' });
+        setTimeout(() => setSubmitStatus(''), 3000);
+      }, 1000);
+    };
+
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-950 via-emerald-900 to-emerald-950">
+        <NavBar />
+        <div className="max-w-2xl mx-auto p-6">
+          <div className="mb-8">
+            <h2 className="text-3xl font-bold text-white mb-2">Contact & Support</h2>
+            <p className="text-emerald-300">Have a question? We're here to help!</p>
+          </div>
+
+          <div className="bg-emerald-800/40 rounded-xl p-6 border border-emerald-700/30 mb-6">
+            <form onSubmit={handleContactSubmit} className="space-y-4">
+              <div>
+                <label className="text-white font-semibold mb-2 block">Name</label>
+                <input
+                  type="text"
+                  value={contactForm.name}
+                  onChange={(e) => setContactForm({ ...contactForm, name: e.target.value })}
+                  required
+                  className="w-full bg-emerald-900/50 border border-emerald-700/50 rounded-xl px-4 py-3 text-white placeholder-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  placeholder="Your name"
+                />
+              </div>
+
+              <div>
+                <label className="text-white font-semibold mb-2 block">Email</label>
+                <input
+                  type="email"
+                  value={contactForm.email}
+                  onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })}
+                  required
+                  className="w-full bg-emerald-900/50 border border-emerald-700/50 rounded-xl px-4 py-3 text-white placeholder-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  placeholder="your.email@example.com"
+                />
+              </div>
+
+              <div>
+                <label className="text-white font-semibold mb-2 block">Subject</label>
+                <select
+                  value={contactForm.subject}
+                  onChange={(e) => setContactForm({ ...contactForm, subject: e.target.value })}
+                  required
+                  className="w-full bg-emerald-900/50 border border-emerald-700/50 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                >
+                  <option value="">Select a topic</option>
+                  <option value="billing">Billing & Subscriptions</option>
+                  <option value="technical">Technical Support</option>
+                  <option value="account">Account Issues</option>
+                  <option value="feature">Feature Request</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-white font-semibold mb-2 block">Message</label>
+                <textarea
+                  value={contactForm.message}
+                  onChange={(e) => setContactForm({ ...contactForm, message: e.target.value })}
+                  required
+                  rows={6}
+                  className="w-full bg-emerald-900/50 border border-emerald-700/50 rounded-xl px-4 py-3 text-white placeholder-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  placeholder="How can we help you?"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={submitStatus === 'sending'}
+                className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-bold py-3 px-6 rounded-xl hover:from-emerald-600 hover:to-emerald-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                <Send className="w-5 h-5" />
+                {submitStatus === 'sending' ? 'Sending...' : 'Send Message'}
+              </button>
+
+              {submitStatus === 'success' && (
+                <div className="bg-emerald-600/20 border border-emerald-500/50 rounded-xl p-4 text-center">
+                  <CheckCircle className="w-6 h-6 text-emerald-400 mx-auto mb-2" />
+                  <p className="text-emerald-300">Message sent! We'll get back to you soon.</p>
+                </div>
+              )}
+            </form>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-emerald-800/40 rounded-xl p-4 border border-emerald-700/30">
+              <Mail className="w-6 h-6 text-emerald-400 mb-2" />
+              <h3 className="text-white font-semibold mb-1">Email Us</h3>
+              <p className="text-emerald-300 text-sm">support@spamstopper.com</p>
+            </div>
+
+            <div className="bg-emerald-800/40 rounded-xl p-4 border border-emerald-700/30">
+              <FileText className="w-6 h-6 text-emerald-400 mb-2" />
+              <h3 className="text-white font-semibold mb-1">Documentation</h3>
+              <button
+                onClick={() => setCurrentScreen('tutorial')}
+                className="text-emerald-400 text-sm hover:text-emerald-300"
+              >
+                View Tutorial →
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Legal/Privacy Screen
+  if (currentScreen === 'legal') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-950 via-emerald-900 to-emerald-950">
+        <NavBar />
+        <div className="max-w-4xl mx-auto p-6">
+          <div className="mb-8">
+            <h2 className="text-3xl font-bold text-white mb-2">Legal & Privacy</h2>
+            <p className="text-emerald-300">Our commitment to your privacy and security</p>
+          </div>
+
+          <div className="space-y-6">
+            {/* Privacy Policy */}
+            <div className="bg-emerald-800/40 rounded-xl p-6 border border-emerald-700/30">
+              <h3 className="text-2xl font-bold text-white mb-4">Privacy Policy</h3>
+
+              <div className="space-y-4 text-emerald-300">
+                <div>
+                  <h4 className="text-white font-semibold mb-2">Information We Collect</h4>
+                  <p className="text-sm">
+                    We collect information you provide directly to us, including your name, email address, phone number,
+                    and payment information. We also collect call logs, recordings, and transcripts to provide our service.
+                  </p>
+                </div>
+
+                <div>
+                  <h4 className="text-white font-semibold mb-2">How We Use Your Information</h4>
+                  <p className="text-sm">
+                    We use the information we collect to provide, maintain, and improve our services, process transactions,
+                    send you technical notices and support messages, and respond to your comments and questions.
+                  </p>
+                </div>
+
+                <div>
+                  <h4 className="text-white font-semibold mb-2">Data Security</h4>
+                  <p className="text-sm">
+                    We take reasonable measures to help protect your personal information from loss, theft, misuse,
+                    unauthorized access, disclosure, alteration, and destruction. All data is encrypted in transit and at rest.
+                  </p>
+                </div>
+
+                <div>
+                  <h4 className="text-white font-semibold mb-2">Data Retention</h4>
+                  <p className="text-sm">
+                    We retain your information for as long as your account is active or as needed to provide you services.
+                    You can request deletion of your data at any time by contacting support.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Terms of Service */}
+            <div className="bg-emerald-800/40 rounded-xl p-6 border border-emerald-700/30">
+              <h3 className="text-2xl font-bold text-white mb-4">Terms of Service</h3>
+
+              <div className="space-y-4 text-emerald-300">
+                <div>
+                  <h4 className="text-white font-semibold mb-2">Service Description</h4>
+                  <p className="text-sm">
+                    SpamStopper provides AI-powered spam call blocking and management services. We forward spam calls to
+                    AI personas that engage with callers, keeping you free from unwanted interruptions.
+                  </p>
+                </div>
+
+                <div>
+                  <h4 className="text-white font-semibold mb-2">Acceptable Use</h4>
+                  <p className="text-sm">
+                    You agree to use our service only for lawful purposes and in accordance with these Terms. You may not use
+                    our service in any way that could damage, disable, or impair our servers or networks.
+                  </p>
+                </div>
+
+                <div>
+                  <h4 className="text-white font-semibold mb-2">Subscription & Billing</h4>
+                  <p className="text-sm">
+                    Subscriptions are billed monthly in advance. You can cancel at any time, and your subscription will remain
+                    active until the end of your current billing period. No refunds for partial months.
+                  </p>
+                </div>
+
+                <div>
+                  <h4 className="text-white font-semibold mb-2">Limitation of Liability</h4>
+                  <p className="text-sm">
+                    SpamStopper is provided "as is" without warranties of any kind. We are not liable for any damages arising
+                    from your use of the service, including but not limited to missed important calls or data loss.
+                  </p>
+                </div>
+
+                <div>
+                  <h4 className="text-white font-semibold mb-2">Contact</h4>
+                  <p className="text-sm">
+                    For questions about these terms or our privacy practices, please contact us at support@spamstopper.com
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-emerald-700/20 rounded-xl p-4 border border-emerald-600/30 text-center">
+              <p className="text-emerald-300 text-sm">
+                Last updated: {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+              </p>
+            </div>
           </div>
         </div>
       </div>
