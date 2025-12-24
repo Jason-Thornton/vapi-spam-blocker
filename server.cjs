@@ -123,6 +123,183 @@ app.get('/api/assistants', async (req, res) => {
     });
   }
 });
+
+// =============================================================================
+// VAPI WEBHOOK - Handles incoming call events from Vapi
+// =============================================================================
+app.post('/api/vapi-webhook', async (req, res) => {
+  const event = req.body;
+
+  console.log('📞 Vapi webhook received:', JSON.stringify(event, null, 2));
+  console.log('Event type:', event.message?.type || event.type);
+
+  try {
+    // Import Supabase dynamically since we're using CommonJS
+    const { createClient } = await import('@supabase/supabase-js');
+    const supabase = createClient(
+      process.env.VITE_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_KEY
+    );
+
+    // Persona mapping
+    const personas = [
+      { id: '37c03d2d-c045-42f5-b8f5-53beca2b34d8', name: 'Herbert' },
+      { id: '23ed87ac-9f1e-4353-a3aa-c27d70d93342', name: 'Jolene' },
+      { id: 'd99eeb74-6dad-4149-ac33-e2c7bb0dba57', name: 'Derek' },
+      { id: 'b2243844-0748-442f-b7c8-395b6f342e0f', name: 'Danny' }
+    ];
+
+    // Handle different webhook event types
+    const eventType = event.message?.type || event.type;
+
+    // CALL STARTED EVENT
+    if (eventType === 'status-update' && event.message?.status === 'ringing') {
+      console.log('🔔 Call is ringing...');
+    }
+
+    if (eventType === 'status-update' && event.message?.status === 'in-progress') {
+      console.log('✅ Call started!');
+      const customerNumber = event.message.call?.customer?.number;
+      const assistantId = event.message.call?.assistantId;
+
+      if (customerNumber) {
+        // Find user by phone number
+        const { data: user } = await supabase
+          .from('users')
+          .select('*')
+          .eq('phone_number', customerNumber)
+          .single();
+
+        if (user) {
+          console.log('📝 Call started for user:', user.email);
+        }
+      }
+    }
+
+    // CALL ENDED EVENT - This is the main one for logging
+    if (eventType === 'end-of-call-report') {
+      const callData = event.message;
+      const customerNumber = callData.call?.customer?.number;
+      const assistantId = callData.call?.assistantId;
+      const duration = callData.call?.endedAt
+        ? Math.floor((new Date(callData.call.endedAt) - new Date(callData.call.startedAt)) / 1000)
+        : 0;
+
+      console.log('📝 Logging completed call from:', customerNumber);
+      console.log('Duration:', duration, 'seconds');
+
+      // Find user by phone number
+      const { data: user } = await supabase
+        .from('users')
+        .select('*')
+        .eq('phone_number', customerNumber)
+        .single();
+
+      if (!user) {
+        console.log('⚠️ Call completed but user not found:', customerNumber);
+        return res.json({ received: true, warning: 'User not found' });
+      }
+
+      // Check if user has calls remaining before logging
+      if (user.calls_used_this_month >= user.calls_limit) {
+        console.log('⚠️ User over limit but call was completed');
+      }
+
+      // Find which persona was used
+      const persona = personas.find(p => p.id === assistantId);
+
+      // Log call to database
+      const { error: logError } = await supabase
+        .from('call_logs')
+        .insert([{
+          user_id: user.id,
+          caller_phone_number: customerNumber,
+          agent_name: persona?.name || 'Unknown',
+          agent_id: assistantId,
+          call_duration: duration,
+          call_status: 'completed',
+          vapi_call_id: callData.call?.id,
+          transcript: callData.transcript || null,
+          recording_url: callData.recordingUrl || null
+        }]);
+
+      if (logError) {
+        console.error('❌ Error logging call:', logError);
+      } else {
+        console.log('✅ Call logged successfully');
+      }
+
+      // Increment user's call counter
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({
+          calls_used_this_month: user.calls_used_this_month + 1,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', user.id);
+
+      if (updateError) {
+        console.error('❌ Error updating call count:', updateError);
+      } else {
+        console.log('✅ Call count updated:', user.calls_used_this_month + 1, '/', user.calls_limit);
+      }
+    }
+
+    // TRANSCRIPT UPDATE (Real-time transcript chunks)
+    if (eventType === 'transcript') {
+      console.log('📝 Transcript chunk received');
+    }
+
+    // FUNCTION CALL (if you're using Vapi functions)
+    if (eventType === 'function-call') {
+      const functionName = event.message?.functionCall?.name;
+      console.log('🔧 Function called:', functionName);
+
+      // Example: Check if user is allowed to make calls
+      if (functionName === 'checkCallAllowed') {
+        const customerNumber = event.message.call?.customer?.number;
+
+        const { data: user } = await supabase
+          .from('users')
+          .select('*')
+          .eq('phone_number', customerNumber)
+          .single();
+
+        if (!user) {
+          return res.json({
+            result: {
+              allowed: false,
+              message: 'Phone number not registered'
+            }
+          });
+        }
+
+        if (user.calls_used_this_month >= user.calls_limit) {
+          return res.json({
+            result: {
+              allowed: false,
+              message: 'Monthly call limit reached. Please upgrade your plan.'
+            }
+          });
+        }
+
+        return res.json({
+          result: {
+            allowed: true,
+            callsRemaining: user.calls_limit - user.calls_used_this_month
+          }
+        });
+      }
+    }
+
+    // Always respond with success to acknowledge receipt
+    res.json({ received: true });
+  } catch (error) {
+    console.error('❌ Vapi webhook error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Create Stripe checkout session
 app.post('/api/create-checkout-session', async (req, res) => {
   const { priceId, userId, userEmail } = req.body;
@@ -176,6 +353,7 @@ app.post('/api/stripe-webhook', raw({type: 'application/json'}), async (req, res
 app.listen(PORT, () => {
   console.log(`✅ Server running on http://localhost:${PORT}`);
   console.log(`🔑 Vapi API Key: ${process.env.VAPI_API_KEY ? 'Connected' : 'Missing'}`);
+  console.log(`🌐 Webhook URL: http://localhost:${PORT}/api/vapi-webhook`);
   if (process.env.VAPI_PHONE_NUMBER_ID) {
     console.log(`📞 Vapi Phone Number ID: ${process.env.VAPI_PHONE_NUMBER_ID}`);
   } else {
