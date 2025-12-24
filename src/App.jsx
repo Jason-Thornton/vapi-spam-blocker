@@ -382,11 +382,12 @@ function MainApp() {
             <p className="text-emerald-300 mb-4">
               Join SpamStopper and let AI defenders handle your spam calls while you enjoy peace and quiet.
             </p>
-            <SignInButton mode="modal">
-              <button className="bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-bold py-3 px-8 rounded-xl hover:from-emerald-600 hover:to-emerald-700 transition-all transform hover:scale-105 shadow-lg shadow-emerald-500/50">
-                Get Started Free - 5 Calls/Month
-              </button>
-            </SignInButton>
+            <button
+              onClick={() => window.location.href = '/'}
+              className="bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-bold py-3 px-8 rounded-xl hover:from-emerald-600 hover:to-emerald-700 transition-all transform hover:scale-105 shadow-lg shadow-emerald-500/50"
+            >
+              Get Started Free - 5 Calls/Month
+            </button>
             <p className="text-emerald-400 text-xs mt-3">No credit card required</p>
           </div>
 
