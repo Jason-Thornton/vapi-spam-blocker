@@ -82,6 +82,9 @@ function MainApp() {
   const [tutorialStep, setTutorialStep] = useState(0);
   const [shareModal, setShareModal] = useState(null);
   const [sharedCall, setSharedCall] = useState(null);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [contactForm, setContactForm] = useState({ name: '', email: '', subject: '', message: '' });
+  const [submitStatus, setSubmitStatus] = useState('');
 
   // API URL - works in both dev and production
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
@@ -179,6 +182,17 @@ function MainApp() {
         console.log('✅ Existing user found:', existingUser);
         setUserProfile(existingUser);
         setSelectedPersona(personas.find(p => p.id === existingUser.selected_agent_id));
+
+        // Load user settings from database
+        setSettings({
+          autoBlock: existingUser.auto_block ?? true,
+          recordCalls: existingUser.record_calls ?? true,
+          blockRobocalls: existingUser.block_robocalls ?? true,
+          blockScammers: existingUser.block_scammers ?? true,
+          blockTelemarketing: existingUser.block_telemarketing ?? true,
+          notifications: existingUser.notifications ?? true,
+          callForwarding: existingUser.call_forwarding ?? false
+        });
 
         // Fetch user's call logs
         const { data: callLogs } = await supabase
@@ -724,7 +738,7 @@ function MainApp() {
       <div className="flex items-center gap-3">
         <Shield className="w-6 h-6 text-emerald-400" />
         <h1 className="text-white font-bold text-lg">SpamStopper</h1>
-        {userProfile && (
+        {userProfile && userProfile.calls_used_this_month !== undefined && userProfile.calls_limit !== undefined && (
           <div className="ml-4 px-3 py-1 bg-emerald-800/50 rounded-full text-xs text-emerald-300">
             {userProfile.calls_used_this_month} / {userProfile.calls_limit === Infinity ? '∞' : userProfile.calls_limit} calls used
           </div>
@@ -952,40 +966,83 @@ function MainApp() {
     );
   }
 
-  // Settings Screen
+  // Settings handlers
+  const handleSavePhone = async () => {
+    const phoneInput = document.getElementById('phoneNumberInput').value;
+
+    if (!phoneInput || !phoneInput.match(/^\+\d{10,15}$/)) {
+      alert('Please enter a valid phone number in E.164 format (e.g., +15551234567)');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('users')
+        .update({ phone_number: phoneInput })
+        .eq('id', userProfile.id);
+
+      if (error) throw error;
+
+      setUserProfile({ ...userProfile, phone_number: phoneInput });
+      alert('Phone number saved! You can now forward spam calls to your AI defender.');
+    } catch (error) {
+      console.error('Error saving phone number:', error);
+      alert('Failed to save phone number');
+    }
+  };
+
+  const handleToggleSetting = async (key, currentValue) => {
+    const newValue = !currentValue;
+
+    // Update local state immediately for responsive UI
+    setSettings({ ...settings, [key]: newValue });
+    setSavingSettings(true);
+
+    try {
+      // Save to database
+      const dbKey = key.replace(/([A-Z])/g, '_$1').toLowerCase();
+      console.log(`🔄 Attempting to save ${key} (${dbKey}) as:`, newValue);
+
+      const { error } = await supabase
+        .from('users')
+        .update({ [dbKey]: newValue })
+        .eq('id', userProfile.id);
+
+      if (error) throw error;
+
+      console.log(`✅ Setting ${key} saved:`, newValue);
+
+      // Brief delay to show feedback
+      setTimeout(() => setSavingSettings(false), 500);
+    } catch (error) {
+      console.error('Error saving setting:', error);
+      // Revert on error
+      setSettings({ ...settings, [key]: currentValue });
+      setSavingSettings(false);
+      alert('Failed to save setting. Please try again.');
+    }
+  };
+
   // Settings Screen
   if (currentScreen === 'settings') {
-    const handleSavePhone = async () => {
-      const phoneInput = document.getElementById('phoneNumberInput').value;
-      
-      if (!phoneInput || !phoneInput.match(/^\+\d{10,15}$/)) {
-        alert('Please enter a valid phone number in E.164 format (e.g., +15551234567)');
-        return;
-      }
-
-      try {
-        const { error } = await supabase
-          .from('users')
-          .update({ phone_number: phoneInput })
-          .eq('id', userProfile.id);
-
-        if (error) throw error;
-
-        setUserProfile({ ...userProfile, phone_number: phoneInput });
-        alert('Phone number saved! You can now forward spam calls to your AI defender.');
-      } catch (error) {
-        console.error('Error saving phone number:', error);
-        alert('Failed to save phone number');
-      }
-    };
 
     return (
       <div className="min-h-screen bg-gradient-to-br from-emerald-950 via-emerald-900 to-emerald-950">
         <NavBar />
         <div className="max-w-2xl mx-auto p-6">
           <div className="mb-8">
-            <h2 className="text-3xl font-bold text-white mb-2">Settings</h2>
-            <p className="text-emerald-300">Manage your account and preferences</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-3xl font-bold text-white mb-2">Settings</h2>
+                <p className="text-emerald-300">Manage your account and preferences</p>
+              </div>
+              {savingSettings && (
+                <div className="flex items-center gap-2 bg-emerald-600/20 px-4 py-2 rounded-xl border border-emerald-500/30">
+                  <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
+                  <span className="text-emerald-300 text-sm">Saving...</span>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="bg-emerald-800/40 rounded-xl p-6 border border-emerald-700/30 mb-6">
@@ -1036,7 +1093,7 @@ function MainApp() {
                   </p>
                 </div>
                 <button
-                  onClick={() => setSettings({ ...settings, [key]: !value })}
+                  onClick={() => handleToggleSetting(key, value)}
                   className={`w-14 h-8 rounded-full transition-all ${
                     value ? 'bg-emerald-500' : 'bg-emerald-800'
                   } relative`}
@@ -1090,25 +1147,22 @@ function MainApp() {
   }
 
   // Contact/Support Screen
+  const handleContactSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitStatus('sending');
+
+    // For now, just log to console - you can add email service later
+    console.log('Contact form submitted:', contactForm);
+
+    // Simulate sending
+    setTimeout(() => {
+      setSubmitStatus('success');
+      setContactForm({ name: '', email: '', subject: '', message: '' });
+      setTimeout(() => setSubmitStatus(''), 3000);
+    }, 1000);
+  };
+
   if (currentScreen === 'contact') {
-    const [contactForm, setContactForm] = useState({ name: '', email: '', subject: '', message: '' });
-    const [submitStatus, setSubmitStatus] = useState('');
-
-    const handleContactSubmit = async (e) => {
-      e.preventDefault();
-      setSubmitStatus('sending');
-
-      // For now, just log to console - you can add email service later
-      console.log('Contact form submitted:', contactForm);
-
-      // Simulate sending
-      setTimeout(() => {
-        setSubmitStatus('success');
-        setContactForm({ name: '', email: '', subject: '', message: '' });
-        setTimeout(() => setSubmitStatus(''), 3000);
-      }, 1000);
-    };
-
     return (
       <div className="min-h-screen bg-gradient-to-br from-emerald-950 via-emerald-900 to-emerald-950">
         <NavBar />
