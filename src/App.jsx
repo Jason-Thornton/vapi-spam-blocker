@@ -195,7 +195,9 @@ function MainApp() {
             duration: log.call_duration ? `${log.call_duration}s` : '0s',
             status: 'blocked',
             persona: log.agent_name,
-            timestamp: new Date(log.created_at).toLocaleString()
+            timestamp: new Date(log.created_at).toLocaleString(),
+            recording_url: log.recording_url,
+            transcript: log.transcript
           })));
         }
       } else if (fetchError) {
@@ -1122,10 +1124,22 @@ function MainApp() {
                       <span className="text-white text-sm font-semibold">{call.persona}</span>
                     </div>
                     <div className="flex items-center gap-3">
-                      <button className="text-emerald-400 hover:text-emerald-300 text-sm font-semibold flex items-center gap-1">
-                        <PlayCircle className="w-4 h-4" />
-                        Play Recording
-                      </button>
+                      {call.recording_url ? (
+                        <a
+                          href={call.recording_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-emerald-400 hover:text-emerald-300 text-sm font-semibold flex items-center gap-1"
+                        >
+                          <PlayCircle className="w-4 h-4" />
+                          Play Recording
+                        </a>
+                      ) : (
+                        <span className="text-emerald-600 text-sm flex items-center gap-1">
+                          <PlayCircle className="w-4 h-4" />
+                          No Recording
+                        </span>
+                      )}
                       <button
                         onClick={() => setShareModal(call)}
                         className="text-emerald-400 hover:text-emerald-300 text-sm font-semibold flex items-center gap-1"
