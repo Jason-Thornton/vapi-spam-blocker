@@ -263,12 +263,12 @@ app.post('/api/vapi-webhook', async (req, res) => {
 
       // Example: Check if user is allowed to make calls
       if (functionName === 'checkCallAllowed') {
-        const customerNumber = event.message.call?.customer?.number;
+        const receivedOnNumber = event.message.phoneNumber?.number;
 
         const { data: user } = await supabase
           .from('users')
           .select('*')
-          .eq('phone_number', customerNumber)
+          .eq('phone_number', receivedOnNumber)
           .single();
 
         if (!user) {
