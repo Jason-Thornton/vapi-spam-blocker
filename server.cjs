@@ -132,6 +132,7 @@ app.post('/api/vapi-webhook', async (req, res) => {
 
   console.log('📞 Vapi webhook received:', JSON.stringify(event, null, 2));
   console.log('Event type:', event.message?.type || event.type);
+  console.log('🕐 Timestamp:', new Date().toISOString());
 
   try {
     // Import Supabase dynamically since we're using CommonJS
@@ -228,18 +229,23 @@ app.post('/api/vapi-webhook', async (req, res) => {
       console.log('Duration:', duration, 'seconds');
 
       // Find user by their CELL number (the one that forwarded to Vapi)
-      const { data: user } = await supabase
+      const { data: user, error: userError } = await supabase
         .from('users')
         .select('*')
         .eq('phone_number', userPhoneNumber)
         .single();
 
+      if (userError) {
+        console.error('❌ Error looking up user:', userError);
+      }
+
       if (!user) {
-        console.log('⚠️ User not found for Vapi number:', receivedOnNumber);
+        console.log('⚠️ User not found for phone number:', userPhoneNumber);
+        console.log('📋 Tried to look up with phone_number =', userPhoneNumber);
         return res.json({ received: true, warning: 'User not found' });
       }
 
-      console.log('✅ Found user:', user.email);
+      console.log('✅ Found user:', user.email, 'ID:', user.id);
 
       // Check if user has calls remaining before logging
       if (user.calls_used_this_month >= user.calls_limit) {
