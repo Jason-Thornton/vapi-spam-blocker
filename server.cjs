@@ -200,7 +200,14 @@ app.post('/api/vapi-webhook', async (req, res) => {
 
       // Extract the FORWARDED FROM number (user's cell) from SIP Diversion header
       let userPhoneNumber = receivedOnNumber; // Default to Vapi number
+
+      console.log('🔍 DEBUG: Checking for Diversion header...');
+      console.log('🔍 DEBUG: phoneCallProviderDetails exists?', !!callData.call?.phoneCallProviderDetails);
+      console.log('🔍 DEBUG: sip exists?', !!callData.call?.phoneCallProviderDetails?.sip);
+      console.log('🔍 DEBUG: headers exists?', !!callData.call?.phoneCallProviderDetails?.sip?.headers);
+
       const diversionHeader = callData.call?.phoneCallProviderDetails?.sip?.headers?.Diversion;
+      console.log('🔍 DEBUG: Diversion header:', diversionHeader);
 
       if (diversionHeader) {
         // Parse Diversion header: "<sip:+16184224956@64.125.111.10:5060>;reason=unconditional..."
@@ -208,7 +215,11 @@ app.post('/api/vapi-webhook', async (req, res) => {
         if (match && match[1]) {
           userPhoneNumber = match[1]; // Extract the forwarded-from number
           console.log('📞 Call forwarded from user cell:', userPhoneNumber);
+        } else {
+          console.log('⚠️ DEBUG: Diversion header found but regex did not match');
         }
+      } else {
+        console.log('⚠️ DEBUG: No Diversion header found');
       }
 
       console.log('📝 Call received on Vapi number:', receivedOnNumber);
@@ -391,6 +402,7 @@ app.post('/api/stripe-webhook', raw({type: 'application/json'}), async (req, res
 app.listen(PORT, () => {
   console.log(`✅ Server running on http://localhost:${PORT}`);
   console.log(`🔑 Vapi API Key: ${process.env.VAPI_API_KEY ? 'Connected' : 'Missing'}`);
+  console.log(`💳 Stripe: ${process.env.STRIPE_SECRET_KEY ? 'Connected' : 'Missing'}`);
   console.log(`🌐 Webhook URL: http://localhost:${PORT}/api/vapi-webhook`);
   if (process.env.VAPI_PHONE_NUMBER_ID) {
     console.log(`📞 Vapi Phone Number ID: ${process.env.VAPI_PHONE_NUMBER_ID}`);
