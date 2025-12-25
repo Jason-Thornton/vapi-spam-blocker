@@ -296,6 +296,100 @@ app.post('/api/vapi-webhook', async (req, res) => {
       const functionName = event.message?.functionCall?.name;
       console.log('🔧 Function called:', functionName);
 
+      // Check if caller is spam/unknown and route accordingly
+      if (functionName === 'checkSpamAndRoute') {
+        // Extract user's cell number from Diversion header
+        let userPhoneNumber = event.message.phoneNumber?.number;
+        const diversionHeader = event.message.call?.phoneCallProviderDetails?.sip?.headers?.Diversion;
+        if (diversionHeader) {
+          const match = diversionHeader.match(/sip:(\+\d+)@/);
+          if (match && match[1]) {
+            userPhoneNumber = match[1];
+          }
+        }
+
+        const callerNumber = event.message.call?.customer?.number;
+        const callerName = event.message.call?.customer?.name || '';
+
+        console.log('🔍 Checking spam status for caller:', callerNumber, 'Name:', callerName);
+
+        // Check if user is registered and has calls remaining
+        const { data: user } = await supabase
+          .from('users')
+          .select('*')
+          .eq('phone_number', userPhoneNumber)
+          .single();
+
+        if (!user) {
+          console.log('⚠️ User not registered');
+          return res.json({
+            result: {
+              isSpam: false,
+              shouldTransfer: true,
+              transferTo: userPhoneNumber,
+              message: 'User not registered. Transferring call.'
+            }
+          });
+        }
+
+        if (user.calls_used_this_month >= user.calls_limit) {
+          console.log('⚠️ User over call limit');
+          return res.json({
+            result: {
+              isSpam: false,
+              shouldTransfer: true,
+              transferTo: userPhoneNumber,
+              message: 'Call limit reached. Transferring to your phone.'
+            }
+          });
+        }
+
+        // Spam detection: Check if caller ID is Unknown, Unavailable, or blocked
+        const isUnknown = !callerNumber ||
+                         callerNumber === 'Unknown' ||
+                         callerNumber === 'Unavailable' ||
+                         callerNumber === 'Anonymous' ||
+                         callerName.toLowerCase().includes('unknown') ||
+                         callerName.toLowerCase().includes('unavailable') ||
+                         callerName.toLowerCase().includes('spam') ||
+                         callerName.toLowerCase().includes('scam');
+
+        // Check user's blocked numbers list
+        const blockedNumbers = user.blocked_numbers || [];
+        const isBlocked = blockedNumbers.includes(callerNumber);
+
+        const isSpam = isUnknown || isBlocked;
+
+        console.log('📊 Spam check result:', {
+          isSpam,
+          isUnknown,
+          isBlocked,
+          callerNumber,
+          callerName
+        });
+
+        if (isSpam) {
+          // This is spam - let Herbert handle it
+          return res.json({
+            result: {
+              isSpam: true,
+              shouldTransfer: false,
+              message: 'Spam detected. AI will handle this call.'
+            }
+          });
+        } else {
+          // Legitimate call - transfer to user's phone
+          return res.json({
+            result: {
+              isSpam: false,
+              shouldTransfer: true,
+              transferTo: userPhoneNumber,
+              message: 'Legitimate caller detected. Transferring to your phone.'
+            }
+          });
+        }
+      }
+
       // Example: Check if user is allowed to make calls
       if (functionName === 'checkCallAllowed') {
         // Extract forwarded-from number from SIP Diversion header
@@ -399,6 +493,62 @@ app.post('/api/stripe-webhook', raw({type: 'application/json'}), async (req, res
 
   res.json({received: true});
 });
+
+// Debug endpoint to check user data and recent call logs
+app.get('/api/debug/user/:phoneNumber', async (req, res) => {
+  const { phoneNumber } = req.params;
+
+  try {
+    const { createClient } = await import('@supabase/supabase-js');
+    const supabase = createClient(
+      process.env.VITE_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_KEY
+    );
+
+    // Find user by phone number
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('phone_number', phoneNumber)
+      .single();
+
+    if (userError || !user) {
+      return res.json({
+        success: false,
+        message: 'User not found',
+        phoneNumber: phoneNumber,
+        error: userError
+      });
+    }
+
+    // Get recent call logs for this user
+    const { data: callLogs, error: logsError } = await supabase
+      .from('call_logs')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        phone_number: user.phone_number,
+        clerk_user_id: user.clerk_user_id,
+        calls_used: user.calls_used_this_month,
+        calls_limit: user.calls_limit,
+        subscription_tier: user.subscription_tier
+      },
+      callLogs: callLogs || [],
+      totalCalls: callLogs?.length || 0
+    });
+  } catch (error) {
+    console.error('Debug endpoint error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`✅ Server running on http://localhost:${PORT}`);
   console.log(`🔑 Vapi API Key: ${process.env.VAPI_API_KEY ? 'Connected' : 'Missing'}`);

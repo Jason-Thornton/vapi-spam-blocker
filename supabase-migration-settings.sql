@@ -8,7 +8,8 @@ ADD COLUMN IF NOT EXISTS block_robocalls BOOLEAN DEFAULT true,
 ADD COLUMN IF NOT EXISTS block_scammers BOOLEAN DEFAULT true,
 ADD COLUMN IF NOT EXISTS block_telemarketing BOOLEAN DEFAULT true,
 ADD COLUMN IF NOT EXISTS notifications BOOLEAN DEFAULT true,
-ADD COLUMN IF NOT EXISTS call_forwarding BOOLEAN DEFAULT false;
+ADD COLUMN IF NOT EXISTS call_forwarding BOOLEAN DEFAULT false,
+ADD COLUMN IF NOT EXISTS blocked_numbers TEXT[] DEFAULT ARRAY[]::TEXT[];
 
 -- Optional: Update existing users to have default settings
 UPDATE users
