@@ -230,15 +230,19 @@ app.post('/api/vapi-webhook', async (req, res) => {
       console.log('Duration:', duration, 'seconds');
 
       // Find user by their CELL number (the one that forwarded to Vapi)
-      const { data: user, error: userError } = await supabase
+      // Use order by updated_at and limit(1) to handle duplicates gracefully
+      const { data: users, error: userError } = await supabase
         .from('users')
         .select('*')
         .eq('phone_number', userPhoneNumber)
-        .single();
+        .order('updated_at', { ascending: false })
+        .limit(1);
 
       if (userError) {
         console.error('❌ Error looking up user:', userError);
       }
+
+      const user = users && users.length > 0 ? users[0] : null;
 
       if (!user) {
         console.log('⚠️ User not found for phone number:', userPhoneNumber);
