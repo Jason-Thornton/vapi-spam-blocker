@@ -162,14 +162,24 @@ app.post('/api/vapi-webhook', async (req, res) => {
       const callerNumber = event.message.call?.customer?.number;
       const receivedOnNumber = event.message.phoneNumber?.number;
 
-      console.log('📞 Spam call from:', callerNumber, 'to Vapi number:', receivedOnNumber);
+      // Extract forwarded-from number from SIP Diversion header
+      let userPhoneNumber = receivedOnNumber;
+      const diversionHeader = event.message.call?.phoneCallProviderDetails?.sip?.headers?.Diversion;
+      if (diversionHeader) {
+        const match = diversionHeader.match(/sip:(\+\d+)@/);
+        if (match && match[1]) {
+          userPhoneNumber = match[1];
+        }
+      }
 
-      if (receivedOnNumber) {
-        // Find user by the Vapi phone number that received the call
+      console.log('📞 Spam call from:', callerNumber, 'forwarded from user cell:', userPhoneNumber, 'to Vapi number:', receivedOnNumber);
+
+      if (userPhoneNumber) {
+        // Find user by their cell number (the one that forwarded to Vapi)
         const { data: user } = await supabase
           .from('users')
           .select('*')
-          .eq('phone_number', receivedOnNumber)
+          .eq('phone_number', userPhoneNumber)
           .single();
 
         if (user) {
@@ -182,21 +192,35 @@ app.post('/api/vapi-webhook', async (req, res) => {
     if (eventType === 'end-of-call-report') {
       const callData = event.message;
       const callerNumber = callData.call?.customer?.number; // The spammer's number
-      const receivedOnNumber = callData.phoneNumber?.number; // Your Vapi number
+      const receivedOnNumber = callData.phoneNumber?.number; // Vapi number that answered
       const assistantId = callData.call?.assistantId;
       const duration = callData.call?.endedAt
         ? Math.floor((new Date(callData.call.endedAt) - new Date(callData.call.startedAt)) / 1000)
         : 0;
 
-      console.log('📝 Call received on:', receivedOnNumber);
+      // Extract the FORWARDED FROM number (user's cell) from SIP Diversion header
+      let userPhoneNumber = receivedOnNumber; // Default to Vapi number
+      const diversionHeader = callData.call?.phoneCallProviderDetails?.sip?.headers?.Diversion;
+
+      if (diversionHeader) {
+        // Parse Diversion header: "<sip:+16184224956@64.125.111.10:5060>;reason=unconditional..."
+        const match = diversionHeader.match(/sip:(\+\d+)@/);
+        if (match && match[1]) {
+          userPhoneNumber = match[1]; // Extract the forwarded-from number
+          console.log('📞 Call forwarded from user cell:', userPhoneNumber);
+        }
+      }
+
+      console.log('📝 Call received on Vapi number:', receivedOnNumber);
       console.log('📝 Call from spam number:', callerNumber);
+      console.log('📝 User cell number (for lookup):', userPhoneNumber);
       console.log('Duration:', duration, 'seconds');
 
-      // Find user by the phone number that RECEIVED the call (your Vapi number)
+      // Find user by their CELL number (the one that forwarded to Vapi)
       const { data: user } = await supabase
         .from('users')
         .select('*')
-        .eq('phone_number', receivedOnNumber)
+        .eq('phone_number', userPhoneNumber)
         .single();
 
       if (!user) {
@@ -263,12 +287,20 @@ app.post('/api/vapi-webhook', async (req, res) => {
 
       // Example: Check if user is allowed to make calls
       if (functionName === 'checkCallAllowed') {
-        const receivedOnNumber = event.message.phoneNumber?.number;
+        // Extract forwarded-from number from SIP Diversion header
+        let userPhoneNumber = event.message.phoneNumber?.number;
+        const diversionHeader = event.message.call?.phoneCallProviderDetails?.sip?.headers?.Diversion;
+        if (diversionHeader) {
+          const match = diversionHeader.match(/sip:(\+\d+)@/);
+          if (match && match[1]) {
+            userPhoneNumber = match[1];
+          }
+        }
 
         const { data: user } = await supabase
           .from('users')
           .select('*')
-          .eq('phone_number', receivedOnNumber)
+          .eq('phone_number', userPhoneNumber)
           .single();
 
         if (!user) {
