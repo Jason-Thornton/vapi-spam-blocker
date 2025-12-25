@@ -4,7 +4,7 @@
   "type": "module",
   "description": "AI-powered spam call blocker",
   "scripts": {
-    "server": "node server.cjs",
+    "server": "node server.js",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"

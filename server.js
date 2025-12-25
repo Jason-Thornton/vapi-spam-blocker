@@ -1,123 +1,12 @@
-import dotenv from 'dotenv';
-dotenv.config();
-
-import express from 'express';
+import express, { json, raw } from 'express';
 import cors from 'cors';
-import Stripe from 'stripe';
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors());
-
-// CRITICAL: Stripe webhook MUST come BEFORE express.json() to receive raw body
-app.post('/api/stripe-webhook', express.raw({type: 'application/json'}), async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  let event;
-
-  try {
-    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET || 'skip');
-  } catch (err) {
-    console.error('⚠️ Webhook signature verification failed:', err.message);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
-
-  console.log('📨 Received Stripe webhook event:', event.type);
-
-  try {
-    // Handle successful checkout
-    if (event.type === 'checkout.session.completed') {
-      const session = event.data.object;
-      const userId = session.metadata.userId;
-      const subscriptionId = session.subscription;
-      
-      console.log('💳 Payment successful for user:', userId);
-
-      // Get the subscription to find the price ID
-      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-      const priceId = subscription.items.data[0].price.id;
-
-      // Map price ID to tier
-      const priceToTier = {
-        'price_1ShVJw4B9Z0lrxzSA6s0oSSY': 'basic',
-        'price_1ShVKa4B9Z0lrxzSUJ9GAJ2e': 'pro',
-        'price_1ShVLV4B9Z0lrxzShnjg62aP': 'unlimited'
-      };
-
-      const tier = priceToTier[priceId];
-      
-      if (!tier) {
-        console.error('❌ Unknown price ID:', priceId);
-        return res.status(400).send('Unknown price ID');
-      }
-
-      // Update user in Supabase
-      const { createClient } = await import('@supabase/supabase-js');
-      const supabase = createClient(
-        process.env.VITE_SUPABASE_URL,
-        process.env.SUPABASE_SERVICE_KEY
-      );
-
-      const callsLimit = tier === 'basic' ? 15 : tier === 'pro' ? 50 : 999999;
-
-      const { data, error } = await supabase
-        .from('users')
-        .update({
-          subscription_tier: tier,
-          subscription_status: 'active',
-          calls_limit: callsLimit,
-          stripe_customer_id: session.customer,
-          stripe_subscription_id: subscriptionId,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', userId);
-
-      if (error) {
-        console.error('❌ Error updating user:', error);
-        return res.status(500).send('Database error');
-      }
-
-      console.log('✅ User upgraded to:', tier);
-    }
-
-    // Handle subscription cancellation
-    if (event.type === 'customer.subscription.deleted') {
-      const subscription = event.data.object;
-      
-      const { createClient } = await import('@supabase/supabase-js');
-      const supabase = createClient(
-        process.env.VITE_SUPABASE_URL,
-        process.env.SUPABASE_SERVICE_KEY
-      );
-
-      const { error } = await supabase
-        .from('users')
-        .update({
-          subscription_tier: 'free',
-          subscription_status: 'cancelled',
-          calls_limit: 5,
-          updated_at: new Date().toISOString()
-        })
-        .eq('stripe_subscription_id', subscription.id);
-
-      if (error) {
-        console.error('❌ Error downgrading user:', error);
-      } else {
-        console.log('✅ User downgraded to free');
-      }
-    }
-
-    res.json({received: true});
-  } catch (error) {
-    console.error('❌ Webhook handler error:', error);
-    res.status(500).send('Webhook handler failed');
-  }
-});
-
-// NOW add JSON parser for other routes
-app.use(express.json());
+app.use(json());
 
 // Check if API key exists
 if (!process.env.VAPI_API_KEY) {
@@ -235,94 +124,18 @@ app.get('/api/assistants', async (req, res) => {
   }
 });
 
-// Create Stripe checkout session
-app.post('/api/create-checkout-session', async (req, res) => {
-  const { priceId, userId, userEmail } = req.body;
-
-  try {
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      line_items: [
-        {
-          price: priceId,
-          quantity: 1,
-        },
-      ],
-      mode: 'subscription',
-      success_url: `${req.headers.origin}/?success=true`,
-      cancel_url: `${req.headers.origin}/?canceled=true`,
-      customer_email: userEmail,
-      metadata: {
-        userId: userId
-      }
-    });
-
-    res.json({ sessionId: session.id, url: session.url });
-  } catch (error) {
-    console.error('Error creating checkout session:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// =============================================================================
-// SHARED CALL - Public endpoint for shared call links
-// =============================================================================
-app.get('/api/shared-call/:callId', async (req, res) => {
-  const { callId } = req.params;
-
-  try {
-    const { createClient } = await import('@supabase/supabase-js');
-    const supabase = createClient(
-      process.env.VITE_SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_KEY
-    );
-
-    // Fetch call from database
-    const { data: call, error } = await supabase
-      .from('call_logs')
-      .select('*')
-      .eq('id', callId)
-      .single();
-
-    if (error || !call) {
-      return res.status(404).json({
-        success: false,
-        error: 'Call not found'
-      });
-    }
-
-    // Return public call data
-    res.json({
-      success: true,
-      call: {
-        id: call.id,
-        number: call.caller_phone_number,
-        duration: call.call_duration ? `${call.call_duration}s` : '0s',
-        persona: call.agent_name,
-        recording_url: call.recording_url,
-        transcript: call.transcript,
-        timestamp: new Date(call.created_at).toLocaleString()
-      }
-    });
-  } catch (error) {
-    console.error('Error fetching shared call:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
 // =============================================================================
 // VAPI WEBHOOK - Handles incoming call events from Vapi
 // =============================================================================
 app.post('/api/vapi-webhook', async (req, res) => {
   const event = req.body;
-  
+
   console.log('📞 Vapi webhook received:', JSON.stringify(event, null, 2));
   console.log('Event type:', event.message?.type || event.type);
+  console.log('🕐 Timestamp:', new Date().toISOString());
 
   try {
+    // Import Supabase dynamically since we're using CommonJS
     const { createClient } = await import('@supabase/supabase-js');
     const supabase = createClient(
       process.env.VITE_SUPABASE_URL,
@@ -343,25 +156,35 @@ app.post('/api/vapi-webhook', async (req, res) => {
     // CALL STARTED EVENT
     if (eventType === 'status-update' && event.message?.status === 'ringing') {
       console.log('🔔 Call is ringing...');
-      // You can add logic here if needed
     }
 
     if (eventType === 'status-update' && event.message?.status === 'in-progress') {
       console.log('✅ Call started!');
-      const customerNumber = event.message.call?.customer?.number;
-      const assistantId = event.message.call?.assistantId;
-      
-      if (customerNumber) {
-        // Find user by phone number
+      const callerNumber = event.message.call?.customer?.number;
+      const receivedOnNumber = event.message.phoneNumber?.number;
+
+      // Extract forwarded-from number from SIP Diversion header
+      let userPhoneNumber = receivedOnNumber;
+      const diversionHeader = event.message.call?.phoneCallProviderDetails?.sip?.headers?.Diversion;
+      if (diversionHeader) {
+        const match = diversionHeader.match(/sip:(\+\d+)@/);
+        if (match && match[1]) {
+          userPhoneNumber = match[1];
+        }
+      }
+
+      console.log('📞 Spam call from:', callerNumber, 'forwarded from user cell:', userPhoneNumber, 'to Vapi number:', receivedOnNumber);
+
+      if (userPhoneNumber) {
+        // Find user by their cell number (the one that forwarded to Vapi)
         const { data: user } = await supabase
           .from('users')
           .select('*')
-          .eq('phone_number', customerNumber)
+          .eq('phone_number', userPhoneNumber)
           .single();
 
         if (user) {
           console.log('📝 Call started for user:', user.email);
-          // You could create a preliminary call log here if you want
         }
       }
     }
@@ -369,42 +192,75 @@ app.post('/api/vapi-webhook', async (req, res) => {
     // CALL ENDED EVENT - This is the main one for logging
     if (eventType === 'end-of-call-report') {
       const callData = event.message;
-      const customerNumber = callData.call?.customer?.number;
+      const callerNumber = callData.call?.customer?.number; // The spammer's number
+      const receivedOnNumber = callData.phoneNumber?.number; // Vapi number that answered
       const assistantId = callData.call?.assistantId;
-      const duration = callData.call?.endedAt 
+      const duration = callData.call?.endedAt
         ? Math.floor((new Date(callData.call.endedAt) - new Date(callData.call.startedAt)) / 1000)
         : 0;
-      
-      console.log('📝 Logging completed call from:', customerNumber);
+
+      // Extract the FORWARDED FROM number (user's cell) from SIP Diversion header
+      let userPhoneNumber = receivedOnNumber; // Default to Vapi number
+
+      console.log('🔍 DEBUG: Checking for Diversion header...');
+      console.log('🔍 DEBUG: phoneCallProviderDetails exists?', !!callData.call?.phoneCallProviderDetails);
+      console.log('🔍 DEBUG: sip exists?', !!callData.call?.phoneCallProviderDetails?.sip);
+      console.log('🔍 DEBUG: headers exists?', !!callData.call?.phoneCallProviderDetails?.sip?.headers);
+
+      const diversionHeader = callData.call?.phoneCallProviderDetails?.sip?.headers?.Diversion;
+      console.log('🔍 DEBUG: Diversion header:', diversionHeader);
+
+      if (diversionHeader) {
+        // Parse Diversion header: "<sip:+16184224956@64.125.111.10:5060>;reason=unconditional..."
+        const match = diversionHeader.match(/sip:(\+\d+)@/);
+        if (match && match[1]) {
+          userPhoneNumber = match[1]; // Extract the forwarded-from number
+          console.log('📞 Call forwarded from user cell:', userPhoneNumber);
+        } else {
+          console.log('⚠️ DEBUG: Diversion header found but regex did not match');
+        }
+      } else {
+        console.log('⚠️ DEBUG: No Diversion header found');
+      }
+
+      console.log('📝 Call received on Vapi number:', receivedOnNumber);
+      console.log('📝 Call from spam number:', callerNumber);
+      console.log('📝 User cell number (for lookup):', userPhoneNumber);
       console.log('Duration:', duration, 'seconds');
 
-      // Find user by phone number
-      const { data: user } = await supabase
+      // Find user by their CELL number (the one that forwarded to Vapi)
+      const { data: user, error: userError } = await supabase
         .from('users')
         .select('*')
-        .eq('phone_number', customerNumber)
+        .eq('phone_number', userPhoneNumber)
         .single();
 
+      if (userError) {
+        console.error('❌ Error looking up user:', userError);
+      }
+
       if (!user) {
-        console.log('⚠️ Call completed but user not found:', customerNumber);
+        console.log('⚠️ User not found for phone number:', userPhoneNumber);
+        console.log('📋 Tried to look up with phone_number =', userPhoneNumber);
         return res.json({ received: true, warning: 'User not found' });
       }
+
+      console.log('✅ Found user:', user.email, 'ID:', user.id);
 
       // Check if user has calls remaining before logging
       if (user.calls_used_this_month >= user.calls_limit) {
         console.log('⚠️ User over limit but call was completed');
-        // Still log the call but you might want to handle this differently
       }
 
       // Find which persona was used
       const persona = personas.find(p => p.id === assistantId);
 
-      // Log call to database
+      // Log call to database (save the SPAMMER's number, not yours)
       const { error: logError } = await supabase
         .from('call_logs')
         .insert([{
           user_id: user.id,
-          caller_phone_number: customerNumber,
+          caller_phone_number: callerNumber, // The spammer's number
           agent_name: persona?.name || 'Unknown',
           agent_id: assistantId,
           call_duration: duration,
@@ -439,22 +295,123 @@ app.post('/api/vapi-webhook', async (req, res) => {
     // TRANSCRIPT UPDATE (Real-time transcript chunks)
     if (eventType === 'transcript') {
       console.log('📝 Transcript chunk received');
-      // You can store these in real-time if you want live transcripts
     }
 
     // FUNCTION CALL (if you're using Vapi functions)
     if (eventType === 'function-call') {
       const functionName = event.message?.functionCall?.name;
       console.log('🔧 Function called:', functionName);
-      
-      // Example: Check if user is allowed to make calls
-      if (functionName === 'checkCallAllowed') {
-        const customerNumber = event.message.call?.customer?.number;
-        
+
+      // Check if caller is spam/unknown and route accordingly
+      if (functionName === 'checkSpamAndRoute') {
+        // Extract user's cell number from Diversion header
+        let userPhoneNumber = event.message.phoneNumber?.number;
+        const diversionHeader = event.message.call?.phoneCallProviderDetails?.sip?.headers?.Diversion;
+        if (diversionHeader) {
+          const match = diversionHeader.match(/sip:(\+\d+)@/);
+          if (match && match[1]) {
+            userPhoneNumber = match[1];
+          }
+        }
+
+        const callerNumber = event.message.call?.customer?.number;
+        const callerName = event.message.call?.customer?.name || '';
+
+        console.log('🔍 Checking spam status for caller:', callerNumber, 'Name:', callerName);
+
+        // Check if user is registered and has calls remaining
         const { data: user } = await supabase
           .from('users')
           .select('*')
-          .eq('phone_number', customerNumber)
+          .eq('phone_number', userPhoneNumber)
+          .single();
+
+        if (!user) {
+          console.log('⚠️ User not registered');
+          return res.json({
+            result: {
+              isSpam: false,
+              shouldTransfer: true,
+              transferTo: userPhoneNumber,
+              message: 'User not registered. Transferring call.'
+            }
+          });
+        }
+
+        if (user.calls_used_this_month >= user.calls_limit) {
+          console.log('⚠️ User over call limit');
+          return res.json({
+            result: {
+              isSpam: false,
+              shouldTransfer: true,
+              transferTo: userPhoneNumber,
+              message: 'Call limit reached. Transferring to your phone.'
+            }
+          });
+        }
+
+        // Spam detection: Check if caller ID is Unknown, Unavailable, or blocked
+        const isUnknown = !callerNumber ||
+                         callerNumber === 'Unknown' ||
+                         callerNumber === 'Unavailable' ||
+                         callerNumber === 'Anonymous' ||
+                         callerName.toLowerCase().includes('unknown') ||
+                         callerName.toLowerCase().includes('unavailable') ||
+                         callerName.toLowerCase().includes('spam') ||
+                         callerName.toLowerCase().includes('scam');
+
+        // Check user's blocked numbers list
+        const blockedNumbers = user.blocked_numbers || [];
+        const isBlocked = blockedNumbers.includes(callerNumber);
+
+        const isSpam = isUnknown || isBlocked;
+
+        console.log('📊 Spam check result:', {
+          isSpam,
+          isUnknown,
+          isBlocked,
+          callerNumber,
+          callerName
+        });
+
+        if (isSpam) {
+          // This is spam - let Herbert handle it
+          return res.json({
+            result: {
+              isSpam: true,
+              shouldTransfer: false,
+              message: 'Spam detected. AI will handle this call.'
+            }
+          });
+        } else {
+          // Legitimate call - transfer to user's phone
+          return res.json({
+            result: {
+              isSpam: false,
+              shouldTransfer: true,
+              transferTo: userPhoneNumber,
+              message: 'Legitimate caller detected. Transferring to your phone.'
+            }
+          });
+        }
+      }
+
+      // Example: Check if user is allowed to make calls
+      if (functionName === 'checkCallAllowed') {
+        // Extract forwarded-from number from SIP Diversion header
+        let userPhoneNumber = event.message.phoneNumber?.number;
+        const diversionHeader = event.message.call?.phoneCallProviderDetails?.sip?.headers?.Diversion;
+        if (diversionHeader) {
+          const match = diversionHeader.match(/sip:(\+\d+)@/);
+          if (match && match[1]) {
+            userPhoneNumber = match[1];
+          }
+        }
+
+        const { data: user } = await supabase
+          .from('users')
+          .select('*')
+          .eq('phone_number', userPhoneNumber)
           .single();
 
         if (!user) {
@@ -492,6 +449,112 @@ app.post('/api/vapi-webhook', async (req, res) => {
   }
 });
 
+// Create Stripe checkout session
+app.post('/api/create-checkout-session', async (req, res) => {
+  const { priceId, userId, userEmail } = req.body;
+
+  try {
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [
+        {
+          price: priceId,
+          quantity: 1,
+        },
+      ],
+      mode: 'subscription',
+      success_url: `${req.headers.origin}/?success=true`,
+      cancel_url: `${req.headers.origin}/?canceled=true`,
+      customer_email: userEmail,
+      metadata: {
+        userId: userId
+      }
+    });
+
+    res.json({ sessionId: session.id, url: session.url });
+  } catch (error) {
+    console.error('Error creating checkout session:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Stripe webhook to handle successful payments
+app.post('/api/stripe-webhook', raw({type: 'application/json'}), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  let event;
+
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    console.error('Webhook signature verification failed:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // Handle the event
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    console.log('Payment successful!', session);
+    // You'll update the user's subscription in Supabase here
+  }
+
+  res.json({received: true});
+});
+
+// Debug endpoint to check user data and recent call logs
+app.get('/api/debug/user/:phoneNumber', async (req, res) => {
+  const { phoneNumber } = req.params;
+
+  try {
+    const { createClient } = await import('@supabase/supabase-js');
+    const supabase = createClient(
+      process.env.VITE_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_KEY
+    );
+
+    // Find user by phone number
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('phone_number', phoneNumber)
+      .single();
+
+    if (userError || !user) {
+      return res.json({
+        success: false,
+        message: 'User not found',
+        phoneNumber: phoneNumber,
+        error: userError
+      });
+    }
+
+    // Get recent call logs for this user
+    const { data: callLogs, error: logsError } = await supabase
+      .from('call_logs')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        phone_number: user.phone_number,
+        clerk_user_id: user.clerk_user_id,
+        calls_used: user.calls_used_this_month,
+        calls_limit: user.calls_limit,
+        subscription_tier: user.subscription_tier
+      },
+      callLogs: callLogs || [],
+      totalCalls: callLogs?.length || 0
+    });
+  } catch (error) {
+    console.error('Debug endpoint error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`✅ Server running on http://localhost:${PORT}`);
   console.log(`🔑 Vapi API Key: ${process.env.VAPI_API_KEY ? 'Connected' : 'Missing'}`);
@@ -500,6 +563,6 @@ app.listen(PORT, () => {
   if (process.env.VAPI_PHONE_NUMBER_ID) {
     console.log(`📞 Vapi Phone Number ID: ${process.env.VAPI_PHONE_NUMBER_ID}`);
   } else {
-    console.log(`⚠️  No VAPI_PHONE_NUMBER_ID set`);
+    console.log(`⚠️  No VAPI_PHONE_NUMBER_ID set - you may need to add one`);
   }
 });
