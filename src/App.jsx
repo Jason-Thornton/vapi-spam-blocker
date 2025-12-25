@@ -164,6 +164,47 @@ function MainApp() {
     }
   }, [isLoaded, user]);
 
+  // Function to refresh user data and call logs
+  const refreshDashboardData = async () => {
+    if (!userProfile?.id) return;
+
+    try {
+      // Fetch fresh user profile
+      const { data: freshUser } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', userProfile.id)
+        .single();
+
+      if (freshUser) {
+        setUserProfile(freshUser);
+      }
+
+      // Fetch fresh call logs
+      const { data: callLogs } = await supabase
+        .from('call_logs')
+        .select('*')
+        .eq('user_id', userProfile.id)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (callLogs) {
+        setCalls(callLogs.map(log => ({
+          id: log.id,
+          number: log.caller_phone_number,
+          duration: log.call_duration ? `${log.call_duration}s` : '0s',
+          status: 'blocked',
+          persona: log.agent_name,
+          timestamp: new Date(log.created_at).toLocaleString(),
+          recording_url: log.recording_url,
+          transcript: log.transcript
+        })));
+      }
+    } catch (error) {
+      console.error('Error refreshing dashboard:', error);
+    }
+  };
+
   const fetchOrCreateUserProfile = async () => {
     try {
       console.log('Fetching user profile for clerk_user_id:', user.id);
@@ -745,6 +786,15 @@ function MainApp() {
         )}
       </div>
       <div className="flex items-center gap-3">
+        <button
+          onClick={refreshDashboardData}
+          className="p-2 rounded-lg bg-emerald-800/50 hover:bg-emerald-700/50 transition-colors"
+          title="Refresh data"
+        >
+          <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+        </button>
         <div className="flex gap-2">
           <button
             onClick={() => setCurrentScreen('personas')}
