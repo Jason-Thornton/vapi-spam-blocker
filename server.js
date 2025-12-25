@@ -266,39 +266,50 @@ app.post('/api/vapi-webhook', async (req, res) => {
       console.log('📝 Call data keys:', Object.keys(callData));
 
       // Log call to database (save the SPAMMER's number, not yours)
-      const { error: logError } = await supabase
+      const callLogEntry = {
+        user_id: user.id,
+        caller_phone_number: callerNumber, // The spammer's number
+        agent_name: persona?.name || 'Unknown',
+        agent_id: assistantId,
+        call_duration: duration,
+        call_status: 'completed',
+        vapi_call_id: callData.call?.id,
+        transcript: callData.transcript || null,
+        recording_url: callData.recordingUrl || null
+      };
+
+      console.log('📝 Inserting call log:', JSON.stringify(callLogEntry, null, 2));
+
+      const { data: logData, error: logError } = await supabase
         .from('call_logs')
-        .insert([{
-          user_id: user.id,
-          caller_phone_number: callerNumber, // The spammer's number
-          agent_name: persona?.name || 'Unknown',
-          agent_id: assistantId,
-          call_duration: duration,
-          call_status: 'completed',
-          vapi_call_id: callData.call?.id,
-          transcript: callData.transcript || null,
-          recording_url: callData.recordingUrl || null
-        }]);
+        .insert([callLogEntry])
+        .select();
 
       if (logError) {
         console.error('❌ Error logging call:', logError);
       } else {
         console.log('✅ Call logged successfully');
+        console.log('📝 Inserted call log ID:', logData?.[0]?.id);
       }
 
       // Increment user's call counter
-      const { error: updateError } = await supabase
+      console.log('📊 Current count before update:', user.calls_used_this_month);
+      console.log('📊 Updating user ID:', user.id);
+
+      const { data: updateData, error: updateError } = await supabase
         .from('users')
         .update({
           calls_used_this_month: user.calls_used_this_month + 1,
           updated_at: new Date().toISOString()
         })
-        .eq('id', user.id);
+        .eq('id', user.id)
+        .select();
 
       if (updateError) {
         console.error('❌ Error updating call count:', updateError);
       } else {
         console.log('✅ Call count updated:', user.calls_used_this_month + 1, '/', user.calls_limit);
+        console.log('📊 Updated data returned:', updateData);
       }
     }
 
