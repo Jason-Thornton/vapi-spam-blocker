@@ -159,15 +159,17 @@ app.post('/api/vapi-webhook', async (req, res) => {
 
     if (eventType === 'status-update' && event.message?.status === 'in-progress') {
       console.log('✅ Call started!');
-      const customerNumber = event.message.call?.customer?.number;
-      const assistantId = event.message.call?.assistantId;
+      const callerNumber = event.message.call?.customer?.number;
+      const receivedOnNumber = event.message.phoneNumber?.number;
 
-      if (customerNumber) {
-        // Find user by phone number
+      console.log('📞 Spam call from:', callerNumber, 'to Vapi number:', receivedOnNumber);
+
+      if (receivedOnNumber) {
+        // Find user by the Vapi phone number that received the call
         const { data: user } = await supabase
           .from('users')
           .select('*')
-          .eq('phone_number', customerNumber)
+          .eq('phone_number', receivedOnNumber)
           .single();
 
         if (user) {
@@ -179,26 +181,30 @@ app.post('/api/vapi-webhook', async (req, res) => {
     // CALL ENDED EVENT - This is the main one for logging
     if (eventType === 'end-of-call-report') {
       const callData = event.message;
-      const customerNumber = callData.call?.customer?.number;
+      const callerNumber = callData.call?.customer?.number; // The spammer's number
+      const receivedOnNumber = callData.phoneNumber?.number; // Your Vapi number
       const assistantId = callData.call?.assistantId;
       const duration = callData.call?.endedAt
         ? Math.floor((new Date(callData.call.endedAt) - new Date(callData.call.startedAt)) / 1000)
         : 0;
 
-      console.log('📝 Logging completed call from:', customerNumber);
+      console.log('📝 Call received on:', receivedOnNumber);
+      console.log('📝 Call from spam number:', callerNumber);
       console.log('Duration:', duration, 'seconds');
 
-      // Find user by phone number
+      // Find user by the phone number that RECEIVED the call (your Vapi number)
       const { data: user } = await supabase
         .from('users')
         .select('*')
-        .eq('phone_number', customerNumber)
+        .eq('phone_number', receivedOnNumber)
         .single();
 
       if (!user) {
-        console.log('⚠️ Call completed but user not found:', customerNumber);
+        console.log('⚠️ User not found for Vapi number:', receivedOnNumber);
         return res.json({ received: true, warning: 'User not found' });
       }
+
+      console.log('✅ Found user:', user.email);
 
       // Check if user has calls remaining before logging
       if (user.calls_used_this_month >= user.calls_limit) {
@@ -208,12 +214,12 @@ app.post('/api/vapi-webhook', async (req, res) => {
       // Find which persona was used
       const persona = personas.find(p => p.id === assistantId);
 
-      // Log call to database
+      // Log call to database (save the SPAMMER's number, not yours)
       const { error: logError } = await supabase
         .from('call_logs')
         .insert([{
           user_id: user.id,
-          caller_phone_number: customerNumber,
+          caller_phone_number: callerNumber, // The spammer's number
           agent_name: persona?.name || 'Unknown',
           agent_id: assistantId,
           call_duration: duration,
