@@ -260,6 +260,11 @@ app.post('/api/vapi-webhook', async (req, res) => {
       // Find which persona was used
       const persona = personas.find(p => p.id === assistantId);
 
+      // Debug: Log what we're about to save
+      console.log('📝 Recording URL:', callData.recordingUrl);
+      console.log('📝 Transcript:', callData.transcript ? 'Present' : 'Missing');
+      console.log('📝 Call data keys:', Object.keys(callData));
+
       // Log call to database (save the SPAMMER's number, not yours)
       const { error: logError } = await supabase
         .from('call_logs')
