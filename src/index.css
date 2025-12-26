@@ -1,3 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 * {
   margin: 0;
   padding: 0;
@@ -12,33 +16,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-
-5. Save it
-
----
-
-### Create `src/App.jsx`:
-1. Right-click on the `src` folder again
-2. Click "New File"
-3. Name it `App.jsx`
-4. Go back to my previous message and copy the entire **"src/App.jsx - Secure Frontend"** code artifact
-5. Paste it into this file
-6. Save it
-
----
-
-**Step 3: Check your folder structure**
-
-Your project should look like this:
-```
-vapi-spam-blocker/
-├── .env
-├── server.js
-├── package.json
-├── vite.config.js
-├── index.html
-├── node_modules/  (created automatically)
-└── src/
-    ├── main.jsx
-    ├── index.css
-    └── App.jsx
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}

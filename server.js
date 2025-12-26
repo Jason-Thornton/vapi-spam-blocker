@@ -5,7 +5,82 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Middleware
+// IMPORTANT: Stripe webhook must come BEFORE json() middleware
+// Otherwise Stripe signature verification will fail
+app.post('/api/stripe-webhook', raw({type: 'application/json'}), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  let event;
+
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    console.error('Webhook signature verification failed:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // Handle the event
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    console.log('💳 Payment successful!', session);
+
+    try {
+      const { createClient } = await import('@supabase/supabase-js');
+      const supabase = createClient(
+        process.env.VITE_SUPABASE_URL,
+        process.env.SUPABASE_SERVICE_KEY
+      );
+
+      // Get the user's clerk_user_id from session metadata
+      const clerkUserId = session.client_reference_id || session.metadata?.clerk_user_id;
+
+      if (!clerkUserId) {
+        console.error('❌ No clerk_user_id found in session');
+        return res.json({received: true, error: 'No clerk_user_id'});
+      }
+
+      // Determine subscription tier based on price
+      const priceId = session.metadata?.price_id;
+      let subscriptionTier = 'free';
+      let callsLimit = 5;
+
+      if (priceId === 'price_basic' || session.amount_total === 199) { // $1.99
+        subscriptionTier = 'basic';
+        callsLimit = 15;
+      } else if (priceId === 'price_pro' || session.amount_total === 499) { // $4.99
+        subscriptionTier = 'pro';
+        callsLimit = 50;
+      }
+
+      console.log('📊 Upgrading user:', clerkUserId, 'to tier:', subscriptionTier);
+
+      // Update user subscription in Supabase
+      const { data: updateData, error: updateError } = await supabase
+        .from('users')
+        .update({
+          subscription_tier: subscriptionTier,
+          subscription_status: 'active',
+          calls_limit: callsLimit,
+          stripe_customer_id: session.customer,
+          stripe_subscription_id: session.subscription,
+          updated_at: new Date().toISOString()
+        })
+        .eq('clerk_user_id', clerkUserId)
+        .select();
+
+      if (updateError) {
+        console.error('❌ Error updating subscription:', updateError);
+      } else {
+        console.log('✅ Subscription updated successfully:', updateData);
+      }
+    } catch (error) {
+      console.error('❌ Error processing payment webhook:', error);
+    }
+  }
+
+  res.json({received: true});
+});
+
+// Middleware (applied to all other routes)
 app.use(cors());
 app.use(json());
 
@@ -501,78 +576,48 @@ app.post('/api/create-checkout-session', async (req, res) => {
   }
 });
 
-// Stripe webhook to handle successful payments
-app.post('/api/stripe-webhook', raw({type: 'application/json'}), async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  let event;
+// Get shared call data for public viewing
+app.get('/api/shared-call/:callId', async (req, res) => {
+  const { callId } = req.params;
 
   try {
-    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
-  } catch (err) {
-    console.error('Webhook signature verification failed:', err.message);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
+    const { createClient } = await import('@supabase/supabase-js');
+    const supabase = createClient(
+      process.env.VITE_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_KEY
+    );
 
-  // Handle the event
-  if (event.type === 'checkout.session.completed') {
-    const session = event.data.object;
-    console.log('💳 Payment successful!', session);
+    // Get call log by ID
+    const { data: call, error } = await supabase
+      .from('call_logs')
+      .select('*')
+      .eq('id', callId)
+      .single();
 
-    try {
-      const { createClient } = await import('@supabase/supabase-js');
-      const supabase = createClient(
-        process.env.VITE_SUPABASE_URL,
-        process.env.SUPABASE_SERVICE_KEY
-      );
-
-      // Get the user's clerk_user_id from session metadata
-      const clerkUserId = session.client_reference_id || session.metadata?.clerk_user_id;
-
-      if (!clerkUserId) {
-        console.error('❌ No clerk_user_id found in session');
-        return res.json({received: true, error: 'No clerk_user_id'});
-      }
-
-      // Determine subscription tier based on price
-      const priceId = session.metadata?.price_id;
-      let subscriptionTier = 'free';
-      let callsLimit = 5;
-
-      if (priceId === 'price_basic' || session.amount_total === 199) { // $1.99
-        subscriptionTier = 'basic';
-        callsLimit = 15;
-      } else if (priceId === 'price_pro' || session.amount_total === 499) { // $4.99
-        subscriptionTier = 'pro';
-        callsLimit = 50;
-      }
-
-      console.log('📊 Upgrading user:', clerkUserId, 'to tier:', subscriptionTier);
-
-      // Update user subscription in Supabase
-      const { data: updateData, error: updateError } = await supabase
-        .from('users')
-        .update({
-          subscription_tier: subscriptionTier,
-          subscription_status: 'active',
-          calls_limit: callsLimit,
-          stripe_customer_id: session.customer,
-          stripe_subscription_id: session.subscription,
-          updated_at: new Date().toISOString()
-        })
-        .eq('clerk_user_id', clerkUserId)
-        .select();
-
-      if (updateError) {
-        console.error('❌ Error updating subscription:', updateError);
-      } else {
-        console.log('✅ Subscription updated successfully:', updateData);
-      }
-    } catch (error) {
-      console.error('❌ Error processing payment webhook:', error);
+    if (error || !call) {
+      return res.json({
+        success: false,
+        message: 'Call not found'
+      });
     }
-  }
 
-  res.json({received: true});
+    // Return public call data (no user info)
+    res.json({
+      success: true,
+      call: {
+        id: call.id,
+        number: call.caller_phone_number,
+        duration: call.call_duration ? `${call.call_duration}s` : '0s',
+        persona: call.agent_name,
+        timestamp: new Date(call.created_at).toLocaleString(),
+        recording_url: call.recording_url,
+        transcript: call.transcript
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching shared call:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Debug endpoint to check user data and recent call logs
