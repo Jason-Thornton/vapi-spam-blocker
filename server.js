@@ -235,6 +235,15 @@ app.post('/api/vapi-webhook', async (req, res) => {
       { id: 'b2243844-0748-442f-b7c8-395b6f342e0f', name: 'Danny' }
     ];
 
+    // FALLBACK: Manual mapping for carriers that don't send Diversion header
+    // Maps Vapi phone numbers to user cell numbers
+    const vapiNumberToUserMap = {
+      '+16183528320': '+16184224956',  // Herbert → Your cell
+      '+16183528316': '+16184224956',  // Jolene → Your cell
+      '+18154264287': '+16184224956',  // Derek → Your cell
+      '+18138092181': '+16184224956'   // Danny → Your cell
+    };
+
     // Handle different webhook event types
     const eventType = event.message?.type || event.type;
 
@@ -255,6 +264,16 @@ app.post('/api/vapi-webhook', async (req, res) => {
         const match = diversionHeader.match(/sip:(\+\d+)@/);
         if (match && match[1]) {
           userPhoneNumber = match[1];
+          console.log('✅ Extracted user phone from Diversion header:', userPhoneNumber);
+        }
+      } else {
+        // FALLBACK: Use manual mapping if carrier doesn't send Diversion header
+        console.log('⚠️ No Diversion header - using fallback mapping');
+        if (vapiNumberToUserMap[receivedOnNumber]) {
+          userPhoneNumber = vapiNumberToUserMap[receivedOnNumber];
+          console.log('✅ Mapped Vapi number', receivedOnNumber, '→ user cell:', userPhoneNumber);
+        } else {
+          console.error('❌ No mapping found for Vapi number:', receivedOnNumber);
         }
       }
 
@@ -316,7 +335,14 @@ app.post('/api/vapi-webhook', async (req, res) => {
           console.log('⚠️ DEBUG: Diversion header found but regex did not match');
         }
       } else {
-        console.log('⚠️ DEBUG: No Diversion header found');
+        console.log('⚠️ DEBUG: No Diversion header found - using fallback mapping');
+        // FALLBACK: Use manual mapping if carrier doesn't send Diversion header
+        if (vapiNumberToUserMap[receivedOnNumber]) {
+          userPhoneNumber = vapiNumberToUserMap[receivedOnNumber];
+          console.log('✅ Mapped Vapi number', receivedOnNumber, '→ user cell:', userPhoneNumber);
+        } else {
+          console.error('❌ No mapping found for Vapi number:', receivedOnNumber);
+        }
       }
 
       console.log('📝 Call received on Vapi number:', receivedOnNumber);
@@ -433,12 +459,26 @@ app.post('/api/vapi-webhook', async (req, res) => {
       // Check if caller is spam/unknown and route accordingly
       if (functionName === 'checkSpamAndRoute') {
         // Extract user's cell number from Diversion header
-        let userPhoneNumber = event.message.phoneNumber?.number;
+        const receivedOnNumber = event.message.phoneNumber?.number;
+        let userPhoneNumber = receivedOnNumber;
         const diversionHeader = event.message.call?.phoneCallProviderDetails?.sip?.headers?.Diversion;
+
+        console.log('🔍 Diversion header:', diversionHeader);
+
         if (diversionHeader) {
           const match = diversionHeader.match(/sip:(\+\d+)@/);
           if (match && match[1]) {
             userPhoneNumber = match[1];
+            console.log('✅ Extracted user phone from Diversion header:', userPhoneNumber);
+          }
+        } else {
+          // FALLBACK: Use manual mapping if carrier doesn't send Diversion header
+          console.log('⚠️ No Diversion header - using fallback mapping');
+          if (vapiNumberToUserMap[receivedOnNumber]) {
+            userPhoneNumber = vapiNumberToUserMap[receivedOnNumber];
+            console.log('✅ Mapped Vapi number', receivedOnNumber, '→ user cell:', userPhoneNumber);
+          } else {
+            console.error('❌ No mapping found for Vapi number:', receivedOnNumber);
           }
         }
 
