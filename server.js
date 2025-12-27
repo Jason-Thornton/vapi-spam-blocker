@@ -258,19 +258,30 @@ app.post('/api/vapi-webhook', async (req, res) => {
         }
       }
 
-      console.log('📞 Spam call from:', callerNumber, 'forwarded from user cell:', userPhoneNumber, 'to Vapi number:', receivedOnNumber);
+      console.log('📞 Call from:', callerNumber, 'forwarded from user cell:', userPhoneNumber, 'to Vapi number:', receivedOnNumber);
 
+      // AUTHENTICATION CHECK - Verify user is registered and has calls remaining
       if (userPhoneNumber) {
-        // Find user by their cell number (the one that forwarded to Vapi)
-        const { data: user } = await supabase
+        const { data: user, error } = await supabase
           .from('users')
           .select('*')
           .eq('phone_number', userPhoneNumber)
           .single();
 
-        if (user) {
-          console.log('📝 Call started for user:', user.email);
+        if (!user || error) {
+          console.error('❌ UNAUTHORIZED CALL - User not registered:', userPhoneNumber);
+          console.error('   This call should be rejected!');
+          // Note: We can't end the call here, but we log it for monitoring
+          // The checkSpamAndRoute function will handle the actual rejection
+        } else if (user.calls_used_this_month >= user.calls_limit) {
+          console.warn('⚠️ User over call limit:', user.email);
+          console.warn('   Calls used:', user.calls_used_this_month, '/', user.calls_limit);
+        } else {
+          console.log('✅ Authorized call for user:', user.email);
+          console.log('   Calls remaining:', user.calls_limit - user.calls_used_this_month);
         }
+      } else {
+        console.error('❌ UNAUTHORIZED CALL - No user phone number detected');
       }
     }
 
@@ -342,9 +353,15 @@ app.post('/api/vapi-webhook', async (req, res) => {
 
       console.log('✅ Found user:', user.email, 'ID:', user.id);
 
-      // Check if user has calls remaining before logging
-      if (user.calls_used_this_month >= user.calls_limit) {
-        console.log('⚠️ User over limit but call was completed');
+      // SAFEGUARD: Check if this call should have been rejected
+      // If user was over limit when call started, don't log it or increment counter
+      // (This handles edge cases where limit was reached during the call)
+      const wasOverLimit = user.calls_used_this_month >= user.calls_limit;
+      if (wasOverLimit) {
+        console.warn('⚠️ WARNING: User was over limit when this call started');
+        console.warn('   This call should have been rejected by checkSpamAndRoute');
+        console.warn('   NOT logging this call or incrementing counter');
+        return res.json({ received: true, warning: 'Call from over-limit user - not logged' });
       }
 
       // Find which persona was used
@@ -430,36 +447,44 @@ app.post('/api/vapi-webhook', async (req, res) => {
 
         console.log('🔍 Checking spam status for caller:', callerNumber, 'Name:', callerName);
 
-        // Check if user is registered and has calls remaining
-        const { data: user } = await supabase
+        // CRITICAL: Check if user is registered and has calls remaining
+        const { data: user, error: userError } = await supabase
           .from('users')
           .select('*')
           .eq('phone_number', userPhoneNumber)
           .single();
 
-        if (!user) {
-          console.log('⚠️ User not registered');
+        if (!user || userError) {
+          console.error('❌ UNAUTHORIZED - User not registered:', userPhoneNumber);
+          console.error('   Rejecting call immediately!');
           return res.json({
             result: {
               isSpam: false,
-              shouldTransfer: true,
-              transferTo: userPhoneNumber,
-              message: 'User not registered. Transferring call.'
+              shouldTransfer: false,
+              shouldEndCall: true,
+              rejectCall: true,
+              message: 'Unauthorized access. This service requires registration at spamstopper.com. Goodbye.'
             }
           });
         }
 
         if (user.calls_used_this_month >= user.calls_limit) {
-          console.log('⚠️ User over call limit');
+          console.warn('❌ OVER LIMIT - User:', user.email);
+          console.warn('   Used:', user.calls_used_this_month, 'Limit:', user.calls_limit);
+          console.warn('   Rejecting call!');
           return res.json({
             result: {
               isSpam: false,
-              shouldTransfer: true,
-              transferTo: userPhoneNumber,
-              message: 'Call limit reached. Transferring to your phone.'
+              shouldTransfer: false,
+              shouldEndCall: true,
+              rejectCall: true,
+              message: 'Your monthly call limit has been reached. Please upgrade your plan at spamstopper.com to continue service. Goodbye.'
             }
           });
         }
+
+        console.log('✅ AUTHORIZED - User:', user.email);
+        console.log('   Calls remaining:', user.calls_limit - user.calls_used_this_month);
 
         // Spam detection: Check if caller ID is Unknown, Unavailable, or blocked
         const isUnknown = !callerNumber ||
