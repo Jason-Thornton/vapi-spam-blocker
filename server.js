@@ -43,13 +43,20 @@ app.post('/api/stripe-webhook', raw({type: 'application/json'}), async (req, res
       let subscriptionTier = 'free';
       let callsLimit = 5;
 
-      if (priceId === 'price_basic' || session.amount_total === 199) { // $1.99
+      // Check against actual Stripe Price IDs from environment
+      if (priceId === process.env.STRIPE_PRICE_BASIC || priceId === 'price_1ShVJw4B9Z0lrxzSA6s0oSSY' || session.amount_total === 199) { // $1.99
         subscriptionTier = 'basic';
         callsLimit = 15;
-      } else if (priceId === 'price_pro' || session.amount_total === 499) { // $4.99
+      } else if (priceId === process.env.STRIPE_PRICE_PRO || priceId === 'price_1ShVKa4B9Z0lrxzSUJ9GAJ2e' || session.amount_total === 499) { // $4.99
         subscriptionTier = 'pro';
         callsLimit = 50;
+      } else if (priceId === process.env.STRIPE_PRICE_UNLIMITED || priceId === 'price_1ShVLV4B9Z0lrxzShnjg62aP' || session.amount_total === 999) { // $9.99
+        subscriptionTier = 'unlimited';
+        callsLimit = Infinity;
       }
+
+      console.log('📊 Price ID received:', priceId);
+      console.log('📊 Amount total:', session.amount_total);
 
       console.log('📊 Upgrading user:', clerkUserId, 'to tier:', subscriptionTier);
 
@@ -206,9 +213,11 @@ app.get('/api/assistants', async (req, res) => {
 app.post('/api/vapi-webhook', async (req, res) => {
   const event = req.body;
 
-  console.log('📞 Vapi webhook received:', JSON.stringify(event, null, 2));
-  console.log('Event type:', event.message?.type || event.type);
+  console.log('\n========== 📞 VAPI WEBHOOK RECEIVED ==========');
   console.log('🕐 Timestamp:', new Date().toISOString());
+  console.log('Event type:', event.message?.type || event.type);
+  console.log('Full event payload:', JSON.stringify(event, null, 2));
+  console.log('===============================================\n');
 
   try {
     // Import Supabase dynamically since we're using CommonJS
@@ -320,9 +329,15 @@ app.post('/api/vapi-webhook', async (req, res) => {
       const user = users && users.length > 0 ? users[0] : null;
 
       if (!user) {
-        console.log('⚠️ User not found for phone number:', userPhoneNumber);
-        console.log('📋 Tried to look up with phone_number =', userPhoneNumber);
-        return res.json({ received: true, warning: 'User not found' });
+        console.error('❌ USER NOT FOUND!');
+        console.error('📋 Searched for phone_number:', userPhoneNumber);
+        console.error('📋 This means the user has not registered their phone number in Settings!');
+        console.error('📋 Tell the user to:');
+        console.error('   1. Log in to the app');
+        console.error('   2. Go to Settings');
+        console.error('   3. Enter their phone number in E.164 format (e.g., +16184224956)');
+        console.error('   4. Click Save');
+        return res.json({ received: true, warning: 'User not found - phone number not registered in app Settings' });
       }
 
       console.log('✅ Found user:', user.email, 'ID:', user.id);
