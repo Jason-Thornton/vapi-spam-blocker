@@ -235,14 +235,13 @@ app.post('/api/vapi-webhook', async (req, res) => {
       { id: 'b2243844-0748-442f-b7c8-395b6f342e0f', name: 'Danny' }
     ];
 
-    // FALLBACK: Manual mapping for carriers that don't send Diversion header
-    // Maps Vapi phone numbers to user cell numbers
-    const vapiNumberToUserMap = {
-      '+16183528320': '+16184224956',  // Herbert → Your cell
-      '+16183528316': '+16184224956',  // Jolene → Your cell
-      '+18154264287': '+16184224956',  // Derek → Your cell
-      '+18138092181': '+16184224956'   // Danny → Your cell
-    };
+    // Available Vapi phone numbers (for assignment to new users)
+    const availableVapiNumbers = [
+      '+16183528320',  // Herbert
+      '+16183528316',  // Jolene
+      '+18154264287',  // Derek
+      '+18138092181'   // Danny
+    ];
 
     // Handle different webhook event types
     const eventType = event.message?.type || event.type;
@@ -258,49 +257,60 @@ app.post('/api/vapi-webhook', async (req, res) => {
       const receivedOnNumber = event.message.phoneNumber?.number;
 
       // Extract forwarded-from number from SIP Diversion header
-      let userPhoneNumber = receivedOnNumber;
+      let user = null;
+      let userLookupMethod = '';
+
       const diversionHeader = event.message.call?.phoneCallProviderDetails?.sip?.headers?.Diversion;
+
       if (diversionHeader) {
+        // Method 1: Extract user's cell from Diversion header
         const match = diversionHeader.match(/sip:(\+\d+)@/);
         if (match && match[1]) {
-          userPhoneNumber = match[1];
+          const userPhoneNumber = match[1];
           console.log('✅ Extracted user phone from Diversion header:', userPhoneNumber);
+          userLookupMethod = 'Diversion header';
+
+          const { data, error } = await supabase
+            .from('users')
+            .select('*')
+            .eq('phone_number', userPhoneNumber)
+            .single();
+          user = data;
         }
       } else {
-        // FALLBACK: Use manual mapping if carrier doesn't send Diversion header
-        console.log('⚠️ No Diversion header - using fallback mapping');
-        if (vapiNumberToUserMap[receivedOnNumber]) {
-          userPhoneNumber = vapiNumberToUserMap[receivedOnNumber];
-          console.log('✅ Mapped Vapi number', receivedOnNumber, '→ user cell:', userPhoneNumber);
+        // Method 2: FALLBACK - Look up user by assigned Vapi number
+        console.log('⚠️ No Diversion header - looking up by assigned Vapi number');
+        userLookupMethod = 'assigned Vapi number';
+
+        const { data, error } = await supabase
+          .from('users')
+          .select('*')
+          .eq('assigned_vapi_number', receivedOnNumber)
+          .single();
+
+        if (data) {
+          user = data;
+          console.log('✅ Found user by Vapi number:', receivedOnNumber, '→', user.email);
         } else {
-          console.error('❌ No mapping found for Vapi number:', receivedOnNumber);
+          console.error('❌ No user assigned to Vapi number:', receivedOnNumber);
         }
       }
 
-      console.log('📞 Call from:', callerNumber, 'forwarded from user cell:', userPhoneNumber, 'to Vapi number:', receivedOnNumber);
+      console.log('📞 Call from:', callerNumber, 'to Vapi number:', receivedOnNumber);
+      console.log('🔍 User lookup method:', userLookupMethod);
 
       // AUTHENTICATION CHECK - Verify user is registered and has calls remaining
-      if (userPhoneNumber) {
-        const { data: user, error } = await supabase
-          .from('users')
-          .select('*')
-          .eq('phone_number', userPhoneNumber)
-          .single();
-
-        if (!user || error) {
-          console.error('❌ UNAUTHORIZED CALL - User not registered:', userPhoneNumber);
-          console.error('   This call should be rejected!');
-          // Note: We can't end the call here, but we log it for monitoring
-          // The checkSpamAndRoute function will handle the actual rejection
-        } else if (user.calls_used_this_month >= user.calls_limit) {
-          console.warn('⚠️ User over call limit:', user.email);
-          console.warn('   Calls used:', user.calls_used_this_month, '/', user.calls_limit);
-        } else {
-          console.log('✅ Authorized call for user:', user.email);
-          console.log('   Calls remaining:', user.calls_limit - user.calls_used_this_month);
-        }
+      if (!user) {
+        console.error('❌ UNAUTHORIZED CALL - No user found for this Vapi number');
+        console.error('   This call should be rejected!');
+        // Note: We can't end the call here, but we log it for monitoring
+        // The checkSpamAndRoute function will handle the actual rejection
+      } else if (user.calls_used_this_month >= user.calls_limit) {
+        console.warn('⚠️ User over call limit:', user.email);
+        console.warn('   Calls used:', user.calls_used_this_month, '/', user.calls_limit);
       } else {
-        console.error('❌ UNAUTHORIZED CALL - No user phone number detected');
+        console.log('✅ Authorized call for user:', user.email);
+        console.log('   Calls remaining:', user.calls_limit - user.calls_used_this_month);
       }
     }
 
@@ -314,60 +324,64 @@ app.post('/api/vapi-webhook', async (req, res) => {
         ? Math.floor((new Date(callData.call.endedAt) - new Date(callData.call.startedAt)) / 1000)
         : 0;
 
-      // Extract the FORWARDED FROM number (user's cell) from SIP Diversion header
-      let userPhoneNumber = receivedOnNumber; // Default to Vapi number
-
-      console.log('🔍 DEBUG: Checking for Diversion header...');
-      console.log('🔍 DEBUG: phoneCallProviderDetails exists?', !!callData.call?.phoneCallProviderDetails);
-      console.log('🔍 DEBUG: sip exists?', !!callData.call?.phoneCallProviderDetails?.sip);
-      console.log('🔍 DEBUG: headers exists?', !!callData.call?.phoneCallProviderDetails?.sip?.headers);
+      // Look up user - try Diversion header first, fallback to assigned Vapi number
+      let user = null;
+      let userLookupMethod = '';
 
       const diversionHeader = callData.call?.phoneCallProviderDetails?.sip?.headers?.Diversion;
-      console.log('🔍 DEBUG: Diversion header:', diversionHeader);
+      console.log('🔍 Diversion header:', diversionHeader);
 
       if (diversionHeader) {
-        // Parse Diversion header: "<sip:+16184224956@64.125.111.10:5060>;reason=unconditional..."
+        // Method 1: Extract user's cell from Diversion header
         const match = diversionHeader.match(/sip:(\+\d+)@/);
         if (match && match[1]) {
-          userPhoneNumber = match[1]; // Extract the forwarded-from number
-          console.log('📞 Call forwarded from user cell:', userPhoneNumber);
-        } else {
-          console.log('⚠️ DEBUG: Diversion header found but regex did not match');
+          const userPhoneNumber = match[1];
+          console.log('✅ Extracted user phone from Diversion header:', userPhoneNumber);
+          userLookupMethod = 'Diversion header';
+
+          const { data: users, error: userError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('phone_number', userPhoneNumber)
+            .order('updated_at', { ascending: false })
+            .limit(1);
+
+          if (userError) {
+            console.error('❌ Error looking up user:', userError);
+          }
+          user = users && users.length > 0 ? users[0] : null;
         }
       } else {
-        console.log('⚠️ DEBUG: No Diversion header found - using fallback mapping');
-        // FALLBACK: Use manual mapping if carrier doesn't send Diversion header
-        if (vapiNumberToUserMap[receivedOnNumber]) {
-          userPhoneNumber = vapiNumberToUserMap[receivedOnNumber];
-          console.log('✅ Mapped Vapi number', receivedOnNumber, '→ user cell:', userPhoneNumber);
+        // Method 2: FALLBACK - Look up user by assigned Vapi number
+        console.log('⚠️ No Diversion header - looking up by assigned Vapi number');
+        userLookupMethod = 'assigned Vapi number';
+
+        const { data, error: userError } = await supabase
+          .from('users')
+          .select('*')
+          .eq('assigned_vapi_number', receivedOnNumber)
+          .single();
+
+        if (userError) {
+          console.error('❌ Error looking up user:', userError);
+        }
+
+        if (data) {
+          user = data;
+          console.log('✅ Found user by Vapi number:', receivedOnNumber, '→', user.email);
         } else {
-          console.error('❌ No mapping found for Vapi number:', receivedOnNumber);
+          console.error('❌ No user assigned to Vapi number:', receivedOnNumber);
         }
       }
 
       console.log('📝 Call received on Vapi number:', receivedOnNumber);
       console.log('📝 Call from spam number:', callerNumber);
-      console.log('📝 User cell number (for lookup):', userPhoneNumber);
+      console.log('🔍 User lookup method:', userLookupMethod);
       console.log('Duration:', duration, 'seconds');
-
-      // Find user by their CELL number (the one that forwarded to Vapi)
-      // Use order by updated_at and limit(1) to handle duplicates gracefully
-      const { data: users, error: userError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('phone_number', userPhoneNumber)
-        .order('updated_at', { ascending: false })
-        .limit(1);
-
-      if (userError) {
-        console.error('❌ Error looking up user:', userError);
-      }
-
-      const user = users && users.length > 0 ? users[0] : null;
 
       if (!user) {
         console.error('❌ USER NOT FOUND!');
-        console.error('📋 Searched for phone_number:', userPhoneNumber);
+        console.error('📋 Searched using:', userLookupMethod);
         console.error('📋 This means the user has not registered their phone number in Settings!');
         console.error('📋 Tell the user to:');
         console.error('   1. Log in to the app');
@@ -458,44 +472,66 @@ app.post('/api/vapi-webhook', async (req, res) => {
 
       // Check if caller is spam/unknown and route accordingly
       if (functionName === 'checkSpamAndRoute') {
-        // Extract user's cell number from Diversion header
         const receivedOnNumber = event.message.phoneNumber?.number;
-        let userPhoneNumber = receivedOnNumber;
-        const diversionHeader = event.message.call?.phoneCallProviderDetails?.sip?.headers?.Diversion;
-
-        console.log('🔍 Diversion header:', diversionHeader);
-
-        if (diversionHeader) {
-          const match = diversionHeader.match(/sip:(\+\d+)@/);
-          if (match && match[1]) {
-            userPhoneNumber = match[1];
-            console.log('✅ Extracted user phone from Diversion header:', userPhoneNumber);
-          }
-        } else {
-          // FALLBACK: Use manual mapping if carrier doesn't send Diversion header
-          console.log('⚠️ No Diversion header - using fallback mapping');
-          if (vapiNumberToUserMap[receivedOnNumber]) {
-            userPhoneNumber = vapiNumberToUserMap[receivedOnNumber];
-            console.log('✅ Mapped Vapi number', receivedOnNumber, '→ user cell:', userPhoneNumber);
-          } else {
-            console.error('❌ No mapping found for Vapi number:', receivedOnNumber);
-          }
-        }
-
         const callerNumber = event.message.call?.customer?.number;
         const callerName = event.message.call?.customer?.name || '';
 
         console.log('🔍 Checking spam status for caller:', callerNumber, 'Name:', callerName);
 
-        // CRITICAL: Check if user is registered and has calls remaining
-        const { data: user, error: userError } = await supabase
-          .from('users')
-          .select('*')
-          .eq('phone_number', userPhoneNumber)
-          .single();
+        // Look up user - try Diversion header first, fallback to assigned Vapi number
+        let user = null;
+        let userLookupMethod = '';
 
-        if (!user || userError) {
-          console.error('❌ UNAUTHORIZED - User not registered:', userPhoneNumber);
+        const diversionHeader = event.message.call?.phoneCallProviderDetails?.sip?.headers?.Diversion;
+        console.log('🔍 Diversion header:', diversionHeader);
+
+        if (diversionHeader) {
+          // Method 1: Extract user's cell from Diversion header
+          const match = diversionHeader.match(/sip:(\+\d+)@/);
+          if (match && match[1]) {
+            const userPhoneNumber = match[1];
+            console.log('✅ Extracted user phone from Diversion header:', userPhoneNumber);
+            userLookupMethod = 'Diversion header';
+
+            const { data, error: userError } = await supabase
+              .from('users')
+              .select('*')
+              .eq('phone_number', userPhoneNumber)
+              .single();
+
+            if (userError) {
+              console.error('❌ Error looking up user:', userError);
+            }
+            user = data;
+          }
+        } else {
+          // Method 2: FALLBACK - Look up user by assigned Vapi number
+          console.log('⚠️ No Diversion header - looking up by assigned Vapi number');
+          userLookupMethod = 'assigned Vapi number';
+
+          const { data, error: userError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('assigned_vapi_number', receivedOnNumber)
+            .single();
+
+          if (userError) {
+            console.error('❌ Error looking up user:', userError);
+          }
+
+          if (data) {
+            user = data;
+            console.log('✅ Found user by Vapi number:', receivedOnNumber, '→', user.email);
+          } else {
+            console.error('❌ No user assigned to Vapi number:', receivedOnNumber);
+          }
+        }
+
+        console.log('🔍 User lookup method:', userLookupMethod);
+
+        // CRITICAL: Check if user is registered and has calls remaining
+        if (!user) {
+          console.error('❌ UNAUTHORIZED - User not found');
           console.error('   Rejecting call immediately!');
           return res.json({
             result: {
