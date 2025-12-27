@@ -256,44 +256,44 @@ app.post('/api/vapi-webhook', async (req, res) => {
       const callerNumber = event.message.call?.customer?.number;
       const receivedOnNumber = event.message.phoneNumber?.number;
 
-      // Extract forwarded-from number from SIP Diversion header
+      // Extract forwarded-from number - try multiple methods
       let user = null;
       let userLookupMethod = '';
+      let userPhoneNumber = null;
 
-      const diversionHeader = event.message.call?.phoneCallProviderDetails?.sip?.headers?.Diversion;
-
-      if (diversionHeader) {
-        // Method 1: Extract user's cell from Diversion header
-        const match = diversionHeader.match(/sip:(\+\d+)@/);
-        if (match && match[1]) {
-          const userPhoneNumber = match[1];
-          console.log('✅ Extracted user phone from Diversion header:', userPhoneNumber);
-          userLookupMethod = 'Diversion header';
-
-          const { data, error } = await supabase
-            .from('users')
-            .select('*')
-            .eq('phone_number', userPhoneNumber)
-            .single();
-          user = data;
-        }
+      // Method 1: Check Twilio's forwardedFrom field (most reliable)
+      const forwardedFrom = event.message.call?.transport?.forwardedFrom;
+      if (forwardedFrom) {
+        userPhoneNumber = forwardedFrom;
+        console.log('✅ Got user phone from Twilio forwardedFrom:', userPhoneNumber);
+        userLookupMethod = 'Twilio forwardedFrom';
       } else {
-        // Method 2: FALLBACK - Look up user by assigned Vapi number
-        console.log('⚠️ No Diversion header - looking up by assigned Vapi number');
-        userLookupMethod = 'assigned Vapi number';
+        // Method 2: Check SIP Diversion header
+        const diversionHeader = event.message.call?.phoneCallProviderDetails?.sip?.headers?.Diversion;
+        if (diversionHeader) {
+          const match = diversionHeader.match(/sip:(\+\d+)@/);
+          if (match && match[1]) {
+            userPhoneNumber = match[1];
+            console.log('✅ Extracted user phone from Diversion header:', userPhoneNumber);
+            userLookupMethod = 'SIP Diversion header';
+          }
+        }
+      }
 
+      // Look up user by their phone number
+      if (userPhoneNumber) {
         const { data, error } = await supabase
           .from('users')
           .select('*')
-          .eq('assigned_vapi_number', receivedOnNumber)
+          .eq('phone_number', userPhoneNumber)
           .single();
 
-        if (data) {
-          user = data;
-          console.log('✅ Found user by Vapi number:', receivedOnNumber, '→', user.email);
-        } else {
-          console.error('❌ No user assigned to Vapi number:', receivedOnNumber);
+        if (error) {
+          console.error('❌ Error looking up user by phone:', error);
         }
+        user = data;
+      } else {
+        console.error('❌ No forwardedFrom or Diversion header found');
       }
 
       console.log('📞 Call from:', callerNumber, 'to Vapi number:', receivedOnNumber);
@@ -324,54 +324,49 @@ app.post('/api/vapi-webhook', async (req, res) => {
         ? Math.floor((new Date(callData.call.endedAt) - new Date(callData.call.startedAt)) / 1000)
         : 0;
 
-      // Look up user - try Diversion header first, fallback to assigned Vapi number
+      // Extract forwarded-from number - try multiple methods
       let user = null;
       let userLookupMethod = '';
+      let userPhoneNumber = null;
 
-      const diversionHeader = callData.call?.phoneCallProviderDetails?.sip?.headers?.Diversion;
-      console.log('🔍 Diversion header:', diversionHeader);
+      // Method 1: Check Twilio's forwardedFrom field (most reliable)
+      const forwardedFrom = callData.call?.transport?.forwardedFrom;
+      console.log('🔍 Twilio forwardedFrom:', forwardedFrom);
 
-      if (diversionHeader) {
-        // Method 1: Extract user's cell from Diversion header
-        const match = diversionHeader.match(/sip:(\+\d+)@/);
-        if (match && match[1]) {
-          const userPhoneNumber = match[1];
-          console.log('✅ Extracted user phone from Diversion header:', userPhoneNumber);
-          userLookupMethod = 'Diversion header';
-
-          const { data: users, error: userError } = await supabase
-            .from('users')
-            .select('*')
-            .eq('phone_number', userPhoneNumber)
-            .order('updated_at', { ascending: false })
-            .limit(1);
-
-          if (userError) {
-            console.error('❌ Error looking up user:', userError);
-          }
-          user = users && users.length > 0 ? users[0] : null;
-        }
+      if (forwardedFrom) {
+        userPhoneNumber = forwardedFrom;
+        console.log('✅ Got user phone from Twilio forwardedFrom:', userPhoneNumber);
+        userLookupMethod = 'Twilio forwardedFrom';
       } else {
-        // Method 2: FALLBACK - Look up user by assigned Vapi number
-        console.log('⚠️ No Diversion header - looking up by assigned Vapi number');
-        userLookupMethod = 'assigned Vapi number';
+        // Method 2: Check SIP Diversion header
+        const diversionHeader = callData.call?.phoneCallProviderDetails?.sip?.headers?.Diversion;
+        console.log('🔍 Diversion header:', diversionHeader);
 
-        const { data, error: userError } = await supabase
+        if (diversionHeader) {
+          const match = diversionHeader.match(/sip:(\+\d+)@/);
+          if (match && match[1]) {
+            userPhoneNumber = match[1];
+            console.log('✅ Extracted user phone from Diversion header:', userPhoneNumber);
+            userLookupMethod = 'SIP Diversion header';
+          }
+        }
+      }
+
+      // Look up user by their phone number
+      if (userPhoneNumber) {
+        const { data: users, error: userError } = await supabase
           .from('users')
           .select('*')
-          .eq('assigned_vapi_number', receivedOnNumber)
-          .single();
+          .eq('phone_number', userPhoneNumber)
+          .order('updated_at', { ascending: false })
+          .limit(1);
 
         if (userError) {
           console.error('❌ Error looking up user:', userError);
         }
-
-        if (data) {
-          user = data;
-          console.log('✅ Found user by Vapi number:', receivedOnNumber, '→', user.email);
-        } else {
-          console.error('❌ No user assigned to Vapi number:', receivedOnNumber);
-        }
+        user = users && users.length > 0 ? users[0] : null;
+      } else {
+        console.error('❌ No forwardedFrom or Diversion header found');
       }
 
       console.log('📝 Call received on Vapi number:', receivedOnNumber);
@@ -478,53 +473,48 @@ app.post('/api/vapi-webhook', async (req, res) => {
 
         console.log('🔍 Checking spam status for caller:', callerNumber, 'Name:', callerName);
 
-        // Look up user - try Diversion header first, fallback to assigned Vapi number
+        // Extract forwarded-from number - try multiple methods
         let user = null;
         let userLookupMethod = '';
+        let userPhoneNumber = null;
 
-        const diversionHeader = event.message.call?.phoneCallProviderDetails?.sip?.headers?.Diversion;
-        console.log('🔍 Diversion header:', diversionHeader);
+        // Method 1: Check Twilio's forwardedFrom field (most reliable)
+        const forwardedFrom = event.message.call?.transport?.forwardedFrom;
+        console.log('🔍 Twilio forwardedFrom:', forwardedFrom);
 
-        if (diversionHeader) {
-          // Method 1: Extract user's cell from Diversion header
-          const match = diversionHeader.match(/sip:(\+\d+)@/);
-          if (match && match[1]) {
-            const userPhoneNumber = match[1];
-            console.log('✅ Extracted user phone from Diversion header:', userPhoneNumber);
-            userLookupMethod = 'Diversion header';
-
-            const { data, error: userError } = await supabase
-              .from('users')
-              .select('*')
-              .eq('phone_number', userPhoneNumber)
-              .single();
-
-            if (userError) {
-              console.error('❌ Error looking up user:', userError);
-            }
-            user = data;
-          }
+        if (forwardedFrom) {
+          userPhoneNumber = forwardedFrom;
+          console.log('✅ Got user phone from Twilio forwardedFrom:', userPhoneNumber);
+          userLookupMethod = 'Twilio forwardedFrom';
         } else {
-          // Method 2: FALLBACK - Look up user by assigned Vapi number
-          console.log('⚠️ No Diversion header - looking up by assigned Vapi number');
-          userLookupMethod = 'assigned Vapi number';
+          // Method 2: Check SIP Diversion header
+          const diversionHeader = event.message.call?.phoneCallProviderDetails?.sip?.headers?.Diversion;
+          console.log('🔍 Diversion header:', diversionHeader);
 
+          if (diversionHeader) {
+            const match = diversionHeader.match(/sip:(\+\d+)@/);
+            if (match && match[1]) {
+              userPhoneNumber = match[1];
+              console.log('✅ Extracted user phone from Diversion header:', userPhoneNumber);
+              userLookupMethod = 'SIP Diversion header';
+            }
+          }
+        }
+
+        // Look up user by their phone number
+        if (userPhoneNumber) {
           const { data, error: userError } = await supabase
             .from('users')
             .select('*')
-            .eq('assigned_vapi_number', receivedOnNumber)
+            .eq('phone_number', userPhoneNumber)
             .single();
 
           if (userError) {
             console.error('❌ Error looking up user:', userError);
           }
-
-          if (data) {
-            user = data;
-            console.log('✅ Found user by Vapi number:', receivedOnNumber, '→', user.email);
-          } else {
-            console.error('❌ No user assigned to Vapi number:', receivedOnNumber);
-          }
+          user = data;
+        } else {
+          console.error('❌ No forwardedFrom or Diversion header found');
         }
 
         console.log('🔍 User lookup method:', userLookupMethod);
