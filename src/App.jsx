@@ -527,30 +527,94 @@ function MainApp() {
         icon: <Phone className="w-16 h-16 text-emerald-400" />,
         content: (
           <div className="space-y-4 text-left">
-            <p className="text-emerald-300">
-              Set up automatic call forwarding on your phone to send calls to your chosen AI persona's number.
-            </p>
-            <div className="bg-emerald-800/40 rounded-xl p-4">
-              <h4 className="text-white font-semibold mb-2">How it works:</h4>
-              <ol className="space-y-2 text-emerald-300 text-sm list-decimal list-inside">
-                <li>Forward your phone to: <span className="text-white font-mono font-bold">{personas[0].vapiPhoneNumber}</span></li>
-                <li>When a call comes in, it automatically forwards to your AI</li>
-                <li>Spam/unknown numbers are answered by your AI defender</li>
-                <li>Known contacts can still reach you directly</li>
-              </ol>
-            </div>
-            <div className="bg-amber-900/30 border border-amber-700/50 rounded-xl p-4">
-              <p className="text-amber-300 text-sm mb-3">
-                <strong>Tip:</strong> Set up conditional call forwarding for unknown numbers only, so calls from your contacts still come through normally.
+            <div className="bg-gradient-to-r from-amber-900/30 to-orange-900/30 border border-amber-700/50 rounded-xl p-4 mb-4">
+              <p className="text-amber-300 text-sm">
+                <strong>⚠️ Important:</strong> These instructions forward <strong>ALL</strong> incoming calls to your AI. The system may mistake some legitimate calls as spam initially. You can turn it off anytime using the codes below.
               </p>
-              <div className="border-t border-amber-700/30 pt-3">
-                <p className="text-amber-300 text-sm font-semibold mb-2">Turn off call forwarding:</p>
-                <ul className="text-amber-300 text-xs space-y-1 ml-4">
-                  <li>• iPhone: Settings → Phone → Call Forwarding → Toggle OFF</li>
-                  <li>• Android: Phone app → Settings → Calls → Call forwarding → Disable</li>
-                  <li>• Or dial: <span className="font-mono font-bold">##21#</span> to disable all forwarding</li>
-                </ul>
+            </div>
+
+            <div className="bg-emerald-800/40 rounded-xl p-4 mb-4">
+              <h4 className="text-white font-semibold mb-2">Herbert's Number (Default - Free):</h4>
+              <div className="bg-emerald-900/50 rounded-lg p-3 text-center">
+                <span className="text-emerald-400 font-mono font-bold text-xl">{personas[0].vapiPhoneNumber}</span>
               </div>
+              <p className="text-emerald-300 text-xs mt-2">Other AI defenders available with paid plans</p>
+            </div>
+
+            {/* AT&T */}
+            <div className="bg-gradient-to-r from-blue-900/20 to-blue-800/20 border-2 border-blue-700/30 rounded-xl overflow-hidden">
+              <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-4 py-2">
+                <h4 className="text-white font-bold text-lg">AT&T</h4>
+              </div>
+              <div className="p-4 space-y-3">
+                <div>
+                  <p className="text-emerald-400 font-semibold mb-2">Turn ON:</p>
+                  <div className="bg-emerald-900/50 rounded-lg p-3">
+                    <code className="text-emerald-300 font-mono">**21*6183528320#</code>
+                  </div>
+                  <p className="text-emerald-300 text-xs mt-1">Format: **21* + number + #</p>
+                </div>
+                <div>
+                  <p className="text-red-400 font-semibold mb-2">Turn OFF:</p>
+                  <div className="bg-emerald-900/50 rounded-lg p-3">
+                    <code className="text-emerald-300 font-mono">*73#</code>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Verizon */}
+            <div className="bg-gradient-to-r from-red-900/20 to-red-800/20 border-2 border-red-700/30 rounded-xl overflow-hidden">
+              <div className="bg-gradient-to-r from-red-600 to-red-700 px-4 py-2">
+                <h4 className="text-white font-bold text-lg">Verizon</h4>
+              </div>
+              <div className="p-4 space-y-3">
+                <div>
+                  <p className="text-emerald-400 font-semibold mb-2">Turn ON:</p>
+                  <div className="bg-emerald-900/50 rounded-lg p-3">
+                    <code className="text-emerald-300 font-mono">*726183528320</code>
+                  </div>
+                  <p className="text-emerald-300 text-xs mt-1">Format: *72 + number (no spaces)</p>
+                </div>
+                <div>
+                  <p className="text-red-400 font-semibold mb-2">Turn OFF:</p>
+                  <div className="bg-emerald-900/50 rounded-lg p-3">
+                    <code className="text-emerald-300 font-mono">*73</code>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* T-Mobile */}
+            <div className="bg-gradient-to-r from-pink-900/20 to-pink-800/20 border-2 border-pink-700/30 rounded-xl overflow-hidden">
+              <div className="bg-gradient-to-r from-pink-600 to-pink-700 px-4 py-2">
+                <h4 className="text-white font-bold text-lg">T-Mobile</h4>
+              </div>
+              <div className="p-4 space-y-3">
+                <div>
+                  <p className="text-emerald-400 font-semibold mb-2">Turn ON:</p>
+                  <div className="bg-emerald-900/50 rounded-lg p-3">
+                    <code className="text-emerald-300 font-mono">**21*6183528320#</code>
+                  </div>
+                  <p className="text-emerald-300 text-xs mt-1">Format: **21* + number + #</p>
+                </div>
+                <div>
+                  <p className="text-red-400 font-semibold mb-2">Turn OFF:</p>
+                  <div className="bg-emerald-900/50 rounded-lg p-3">
+                    <code className="text-emerald-300 font-mono">##21#</code>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-emerald-800/40 rounded-xl p-4 mt-4">
+              <h4 className="text-white font-semibold mb-2">📱 How to activate:</h4>
+              <ol className="space-y-2 text-emerald-300 text-sm list-decimal list-inside">
+                <li>Open your Phone app (dialer)</li>
+                <li>Dial the code for your carrier</li>
+                <li>Press Call/Send</li>
+                <li>Wait for confirmation tone, then hang up</li>
+              </ol>
             </div>
           </div>
         )

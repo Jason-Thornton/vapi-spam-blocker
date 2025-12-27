@@ -8,7 +8,9 @@
       "Bash(npm install:*)",
       "Bash(npm audit:*)",
       "Bash(npm run build:*)",
-      "Bash(npm uninstall:*)"
+      "Bash(npm uninstall:*)",
+      "Bash(node test-db-connection.js:*)",
+      "Bash(node check-user-calls.js:*)"
     ]
   }
 }
